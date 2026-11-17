@@ -44,7 +44,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   }}));
   await page.goto('http://127.0.0.1:18788/#t=' + token);
   await page.waitForFunction(() => !['storage…', 'storage...'].includes(document.querySelector('#storagePill').textContent));
-  assert.equal(await page.locator('#nav button').count(), 7);
+  assert.equal(await page.locator('#nav button').count(), await page.locator('main section').count());
+  assert.ok(await page.locator('#nav button').count() >= 7);
   const csp = (await page.request.get('http://127.0.0.1:18788/')).headers()['content-security-policy'];
   assert.match(csp, /script-src[^;]*nonce-/);
   assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/);
@@ -234,7 +235,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(11, 15, 26)');
   assert.equal(await page.locator('#bDs').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(0, 229, 255)');
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--mag').trim().toLowerCase()), '#ff2bd6');
-  for (const tab of ['dash', 'models', 'docs', 'storage', 'remote', 'fleet', 'logs']) {
+  for (const tab of await page.locator('#nav button').evaluateAll(bs => bs.map(b => b.dataset.t))) {
    await page.locator(`[data-t="${tab}"]`).click();
    const light = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(el => el.offsetParent !== null || el.tagName === 'HEADER').map(el => {
      const m = getComputedStyle(el).backgroundColor.match(/[\d.]+/g) || []; const [r, g, b, a = 1] = m.map(Number);
@@ -277,7 +278,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
    fs.mkdirSync(process.env.VICTOR_SHOTS_DIR, {recursive: true});
    for (const [width, height] of [[1366, 900], [390, 844]]) {
     await page.setViewportSize({width, height});
-    for (const tab of ['dash', 'models', 'docs', 'storage', 'remote', 'fleet', 'logs']) {
+    for (const tab of await page.locator('#nav button').evaluateAll(bs => bs.map(b => b.dataset.t))) {
      await page.locator(`[data-t="${tab}"]`).click(); await sleep(250);
      await page.screenshot({path: path.join(process.env.VICTOR_SHOTS_DIR, `control-center-${tab}-${width}.png`), fullPage: true});
     }
@@ -289,7 +290,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   }
   for (const width of [1366, 768, 390]) {
    await page.setViewportSize({width, height: 900});
-   for (const tab of ['dash', 'models', 'docs', 'storage', 'remote', 'fleet', 'logs']) {
+   for (const tab of await page.locator('#nav button').evaluateAll(bs => bs.map(b => b.dataset.t))) {
     await page.locator(`[data-t="${tab}"]`).click();
     assert.equal(await page.locator(`#t-${tab}`).isVisible(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true,

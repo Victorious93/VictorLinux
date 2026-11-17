@@ -36,6 +36,7 @@ import docchat  # noqa: E402
 import pccheck  # noqa: E402
 import modellib  # noqa: E402
 import victorinput  # noqa: E402
+import cc_ext  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRIV = os.environ.get("VICTOR_PRIV", "/usr/local/lib/victorlinux/victor-priv")
@@ -1166,7 +1167,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             nonce = pysecrets.token_urlsafe(16)
             with open(os.path.join(HERE, "web", "index.html"), "rb") as f:
                 page = f.read().replace(b"<script>", b'<script nonce="' + nonce.encode() + b'">')
+            html, scripts = cc_ext.web_parts()          # optional feature screens (web/ext); same-origin scripts only
+            page = page.replace(b"<!--VICTOR-EXT-SECTIONS-->", html.encode()).replace(
+                b"<!--VICTOR-EXT-SCRIPTS-->", "".join(f'<script src="/ext/{n}"></script>' for n in scripts).encode())
             return self._send(200, page, "text/html; charset=utf-8", nonce=nonce)
+        if u.path.startswith("/ext/"):
+            js = cc_ext.read_js(u.path[5:])
+            return self._send(200, js, "text/javascript; charset=utf-8") if js is not None else self._send(404, {"error": "not found"})
         if not u.path.startswith("/api/"):
             return self._send(404, {"error": "not found"})
         if not self._auth():
@@ -1255,6 +1262,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 j = json.loads(out)
                 j["summary"] = tc.storage_status()          # same dictionary `victor-storage status --json` prints
                 return self._send(200, j)
+            r = cc_ext.dispatch(APP, "GET", u.path, q)
+            if r is not None:
+                return self._send(*r)
         except tc.GGUFError as e:
             return self._send(400, {"error": f"Invalid GGUF: {e}"})
         except (KeyError, ValueError) as e:
@@ -1413,6 +1423,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(400, {"error": "bad action"})
                 rc, out = APP.priv(["power", act])
                 return self._send(200, {"ok": rc == 0, "message": out})
+            r = cc_ext.dispatch(APP, "POST", p, b)
+            if r is not None:
+                return self._send(*r)
         except tc.GGUFError as e:
             return self._send(400, {"error": f"Invalid GGUF: {e}"})
         except (KeyError, ValueError, RuntimeError) as e:
@@ -1496,10 +1509,12 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def main():
     global APP
     APP = App()
+    cc_ext.load()
     srv = Server(("127.0.0.1", CC_PORT), Handler)
     print(f"VictorLinux Control Center on http://127.0.0.1:{CC_PORT}/ (token in {TOKEN_FILE})", flush=True)
 
     def bye(*_):
+        cc_ext.shutdown(APP)
         APP.stop_llm()
         APP.stop(APP.emb)
         for p in APP.svc.values():
