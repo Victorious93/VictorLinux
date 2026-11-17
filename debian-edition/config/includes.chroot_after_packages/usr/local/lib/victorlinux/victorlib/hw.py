@@ -128,3 +128,33 @@ def snapshot(with_llama=True):
             "cpu": {"cores": os.cpu_count(), "model": next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo")
                     if l.startswith("model name")), "?")},
             "kernel": os.uname().release}
+
+
+def physical_cores():
+    """Distinct (physical id, core id) pairs from /proc/cpuinfo; falls back to the logical count."""
+    seen, phys, core = set(), "0", None
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                k, _, v = line.partition(":")
+                k, v = k.strip(), v.strip()
+                if k == "physical id":
+                    phys = v
+                elif k == "core id":
+                    seen.add((phys, v))
+    except OSError:
+        pass
+    return len(seen) or (os.cpu_count() or 1)
+
+
+def machine_id():
+    """Stable per-PC id for saved benchmark profiles (CPU model, GPU names, RAM size). Never sent anywhere."""
+    from . import autotune
+    cpu = ""
+    try:
+        with open("/proc/cpuinfo") as f:
+            cpu = next((l.split(":", 1)[1].strip() for l in f if l.startswith("model name")), "")
+    except OSError:
+        pass
+    gpus = [d.get("name") for d in llama_devices().get("devices", [])]
+    return autotune.machine_id(cpu, gpus, mem_info().get("total"))
