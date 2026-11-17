@@ -532,7 +532,7 @@ class App:
             return {}
         return autotune.apply(prof, settings.get("gpu_layers", -1), settings.get("threads", 0), settings.get("ctx_auto", True), ctx)
 
-    def start_llm(self, settings, force=False):
+    def start_llm(self, settings, force=False, keep_gateway=False):
         with self.lock:
             if self.llm.running():
                 return {"ok": True, "message": "Already running."}
@@ -573,7 +573,8 @@ class App:
         time.sleep(1.5)
         if not self.llm.running():
             return {"ok": False, "error": "llama-server exited immediately. See the log below.", "log": self.tail("llama", 40)}
-        gw = self.start_gateway(settings)
+        # a model switch keeps the running gateway (and its open client connections); a cold start (re)starts it
+        gw = {"ok": True} if keep_gateway and self.gw.running() else self.start_gateway(settings)
         if not gw.get("ok"):
             return {"ok": False, "error": "Model started but the API gateway did not: " + gw.get("error", "unknown"),
                     "log": self.tail("gateway", 20)}
