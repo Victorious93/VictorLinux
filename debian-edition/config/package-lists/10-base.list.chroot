@@ -41,3 +41,5 @@ dosfstools
 exfatprogs
 ntfs-3g
 rdfind
+# encrypted persistent chats (AES-GCM); without it chats refuse to save rather than store plain text
+python3-cryptography

@@ -1,0 +1,23 @@
+<section id="t-chats" data-tab="chats" data-icon="chat" data-label="Chat">
+ <style>#chLog{display:flex;flex-direction:column;gap:10px;max-height:460px;overflow:auto;padding:4px}.msg{padding:10px 14px;border-radius:16px;border:1px solid var(--bd);white-space:pre-wrap;overflow-wrap:anywhere;max-width:88%}.msg.user{align-self:flex-end;background:#00e5ff14;border-color:#00e5ff55}.msg.assistant{align-self:flex-start;background:var(--s2);border-color:#ff2bd640}.chat-list button{display:block;width:100%;text-align:left;margin:4px 0}.chat-grid{display:grid;grid-template-columns:minmax(0,240px) minmax(0,1fr);gap:16px}@media(max-width:800px){.chat-grid{grid-template-columns:minmax(0,1fr)}}#chMsg{width:100%;min-height:70px;background:var(--bg);color:var(--fg);border:1px solid var(--bd2);border-radius:12px;padding:9px 12px;font:inherit}</style>
+ <div class="hero"><div><div class="eyebrow">Private conversations</div><h2>Chat. <em>Saved encrypted.</em></h2><p>History and chat settings are stored encrypted on your data partition, so they survive a reboot. Only your passphrase opens them.</p></div><span class="hero-badge" id="chBadge">● Locked</span></div>
+ <div id="chWarn"></div>
+ <div class="card" id="chSetup" hidden><h2><svg><use href="#i-lock"/></svg>Create your chat vault</h2><p class="mut">Pick a passphrase of 10 or more characters. It is never stored. If you forget it, the saved chats cannot be opened.</p>
+  <div class="row"><div><label for="chP1">Passphrase</label><input id="chP1" type="password" autocomplete="new-password"></div><div><label for="chP2">Repeat passphrase</label><input id="chP2" type="password" autocomplete="new-password"></div><button class="b" id="chCreate">Create vault</button></div></div>
+ <div class="card" id="chUnlock" hidden><h2><svg><use href="#i-lock"/></svg>Unlock chats</h2>
+  <div class="row"><div><label for="chP">Chat passphrase</label><input id="chP" type="password" autocomplete="current-password"></div><button class="b" id="chOpen">Unlock</button></div></div>
+ <div id="chMain" hidden>
+  <div class="chat-grid"><div class="card"><h2>Chats</h2><div class="row"><button class="b" id="chNew">New chat</button><button class="b s" id="chLock">Lock</button></div><div class="chat-list" id="chList"></div></div>
+   <div class="card"><h2 id="chTitle">New chat</h2><div id="chLog" aria-live="polite"></div>
+    <label for="chMsg">Message</label><textarea id="chMsg" placeholder="Ask your local model…"></textarea>
+    <div class="row"><button class="b" id="chSend">Send</button><button class="b s" id="chDel">Delete this chat</button></div></div></div>
+  <div class="grid"><div class="card"><h2>Chat settings (encrypted)</h2>
+    <label for="chSys">System prompt</label><input id="chSys" style="width:100%">
+    <div class="row"><div><label for="chTemp">Temperature</label><input id="chTemp" type="number" min="0" max="2" step="0.1" style="width:110px"></div><div><label for="chMax">Max tokens</label><input id="chMax" type="number" min="16" max="32768" style="width:120px"></div><div><label for="chAuto">Auto-lock (minutes, 0 = never)</label><input id="chAuto" type="number" min="0" max="1440" style="width:120px"></div></div>
+    <button class="b s" id="chSave">Save settings</button></div>
+   <div class="card"><h2>Export or clear</h2><p class="mut">Exports are plain text, not encrypted. Clearing deletes every saved chat.</p>
+    <div class="row"><button class="b s" id="chExpMd">Export Markdown</button><button class="b s" id="chExpJson">Export JSON</button></div>
+    <div class="row"><input type="checkbox" id="chSure"><label for="chSure" style="margin:0">Yes, delete all saved chats</label><input type="checkbox" id="chForget"><label for="chForget" style="margin:0">Also remove the vault and passphrase check</label></div>
+    <button class="b d" id="chClear">Clear chats</button></div></div>
+ </div>
+</section>
