@@ -233,6 +233,7 @@ Usage: victor-phone-headless [options] <command> [command options]
   screencap FILE         Save a PNG screenshot with adb (no scrcpy needed)
   record FILE            Record with scrcpy, no window (needs scrcpy)
   mirror                 Start scrcpy (needs a display unless you pass --no-window)
+  dash --dry-run         Show the per-phone scrcpy plan for the 3-phone dashboard (open it with victor-phone-dash)
 
 Global options:
   -h, --help             Show this help
@@ -441,6 +442,30 @@ def cmd_scrcpy(args: argparse.Namespace, *, record_file: str, no_window: bool) -
     return 1
 
 
+def cmd_dash(args: argparse.Namespace) -> int:
+    """`dash --dry-run [--json]`: show what the multi-phone dashboard would start (up to three ready phones), without starting it."""
+    import victordash
+    devices, _raw = list_devices()
+    ready = [d for d in devices if d.ready][: victordash.MAX_TILES]
+    if not ready:
+        print(device_hint(devices) or "No phone is ready.", file=sys.stderr)
+        return 1
+    plan = []
+    d = victordash.Dashboard()
+    rects = victordash.grid(len(ready), 1200, 800)
+    for i, dev in enumerate(ready):
+        t = d.add(victordash.Phone(dev.serial, dev.state, dev.model))
+        plan.append({"slot": t.slot, "serial": dev.serial, "argv": victordash.scrcpy_tile_argv(t, rects[i])})
+    if args.json:
+        print(json.dumps(plan, indent=2))
+    else:
+        for item in plan:
+            print(" ".join(item["argv"]))
+    if not args.dry_run:
+        print("Use victor-phone-dash to open the dashboard window.", file=sys.stderr)
+    return 0
+
+
 def main_headless(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -463,6 +488,8 @@ def main_headless(argv: list[str] | None = None) -> int:
             return cmd_wait(args)
         if command == "screencap":
             return cmd_screencap(args)
+        if command == "dash":
+            return cmd_dash(args)
         if command == "record":
             return cmd_scrcpy(args, record_file=args.target, no_window=True)
         if command == "mirror":
@@ -650,6 +677,7 @@ def main_gui(argv: list[str] | None = None) -> int:
             row.pack(fill="x")
             ttk.Label(row, text="Devices").pack(side="left")
             ttk.Button(row, text="Refresh", command=self.refresh_devices).pack(side="right")
+            ttk.Button(row, text="Dashboard (up to 3)", command=self.open_dashboard).pack(side="right", padx=6)
 
             self.listbox = tk.Listbox(body, height=6, exportselection=False, activestyle="none")
             self.listbox.pack(fill="x", pady=(6, 12))
@@ -745,6 +773,11 @@ def main_gui(argv: list[str] | None = None) -> int:
                 self.record_path.set(path)
                 self.record_var.set(True)
                 self._toggle_record()
+
+        def open_dashboard(self) -> None:
+            import victordashctl
+            res = victordashctl.launch_dashboard()
+            self.set_status(res.message, "ok" if res.ok else "bad")
 
         def append_log(self, text: str) -> None:
             self.log.configure(state="normal")

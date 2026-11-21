@@ -9,6 +9,12 @@ mousepad
 firefox-esr
 fonts-dejavu
 python3-tk
+# Phone dashboard: pactl/parec, local speech synthesis, selection readers, xrandr
+pulseaudio-utils
+espeak-ng
+xclip
+wl-clipboard
+x11-xserver-utils
 gnome-themes-extra
 adwaita-icon-theme
 libglib2.0-bin

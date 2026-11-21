@@ -13,6 +13,12 @@
       </action>
     </item>
 
+    <item label="VictorLinux Phone Dashboard">
+      <action name="Execute">
+        <execute>victor-phone-dash</execute>
+      </action>
+    </item>
+
     <separator/>
 
     <menu id="games-menu" label="Games">

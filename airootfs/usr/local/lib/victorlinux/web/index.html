@@ -211,7 +211,7 @@ footer{color:var(--mut);font-size:11px;text-align:center;padding:14px 24px 28px;
 </section>
 <section id="t-fleet">
  <div class="card"><h2>Phone fleet</h2><p class="mut">Coordinator for up to 4 DroidCommand phones. Off until you start it; local-only until fleet networking is enabled (<code>victor-fleet config --enable-network ADDR</code>). Phones keep their own approvals; Revoke takes effect immediately.</p>
-  <div class="row"><button class="b" id="fStart">Start</button><button class="b d" id="fStop">Stop</button><button class="b s" id="fRef">Refresh</button><button class="b" id="fPair">Pair phone</button></div>
+  <div class="row"><button class="b" id="fStart">Start</button><button class="b d" id="fStop">Stop</button><button class="b s" id="fRef">Refresh</button><button class="b" id="fPair">Pair phone</button><button class="b" id="fDash">Open phone dashboard (up to 3 screens)</button></div>
   <pre id="fOut"></pre></div>
  <div class="card"><h2>Devices</h2><div id="fDevs"></div></div>
  <div class="card"><h2>Plans</h2><div id="fPlans"></div></div>
@@ -243,7 +243,7 @@ async function loadFleet(keep){const s=await api("/api/fleet");if(s.error){$("fO
  $("fDevs").innerHTML=(s.devices||[]).map(d=>{const st=d.device_state||{},rt=(d.capabilities||{}).root||{};return `<div class="row"><b>${esc(d.name)}</b> <span class="mut">${esc(d.state)}${d.paused?" paused":""}${d.enabled?"":" disabled"} · ${d.connected?"connected":"offline"} · battery ${esc(st.battery_percent??"?")}% · thermal ${esc(st.thermal??"?")} · root ${rt.granted?"granted":"no"} · jobs ${d.active_jobs.length}</span> <button class="b s" data-c="pause" data-a="${esc(d.id)}">Pause</button><button class="b s" data-c="resume" data-a="${esc(d.id)}">Resume</button><button class="b d" data-c="revoke" data-a="${esc(d.id)}">Revoke</button></div>`}).join("")||"<p class=mut>No paired phones.</p>";
  $("fPlans").innerHTML=(s.plans||[]).map(p=>`<div class="row"><b>${esc(p.title)}</b> <span class="mut">${esc(p.state)} · ${esc(p.id)}</span> <button class="b s" data-c="review" data-a="${esc(p.id)}">Review</button><button class="b" data-c="approve" data-a="${esc(p.id)}">Approve</button><button class="b s" data-c="report" data-a="${esc(p.id)}">Report</button><button class="b d" data-c="cancel" data-a="${esc(p.id)}">Cancel</button></div>`).join("")||"<p class=mut>No plans.</p>"}
 document.addEventListener("click",e=>{const b=e.target.closest("button[data-c]");if(b){if(b.dataset.c==="revoke"&&!confirm("Revoke this phone? Its credential stops working immediately."))return;fleetAct(b.dataset.c,b.dataset.a)}});
-document.addEventListener("DOMContentLoaded",()=>{for(const [id,c] of [["fStart","start"],["fStop","stop"],["fPair","pair"]])$(id).onclick=()=>fleetAct(c);$("fRef").onclick=()=>loadFleet()});
+document.addEventListener("DOMContentLoaded",()=>{for(const [id,c] of [["fStart","start"],["fStop","stop"],["fPair","pair"]])$(id).onclick=()=>fleetAct(c);$("fRef").onclick=()=>loadFleet();$("fDash").onclick=async()=>{const j=await api("/api/phone/dashboard",{});toast(j.error||j.message,j.error?"bad":undefined)}});
 $("nav").onclick=e=>{const b=e.target.closest("button");if(b)show(b.dataset.t)};
 // Keyboard: arrows / Home / End move between tabs (WAI-ARIA tabs pattern).
 $("nav").addEventListener("keydown",e=>{const bs=[...document.querySelectorAll("#nav button")],i=bs.indexOf(document.activeElement);if(i<0)return;

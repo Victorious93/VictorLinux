@@ -461,7 +461,8 @@ class App(tk.Tk):
         b = ttk.Frame(f); b.pack(fill="x", pady=4)
         for t, fn in (("Refresh", self.fleet_refresh), ("Start", lambda: self.fleet_do("start")), ("Stop", lambda: self.fleet_do("stop")),
                       ("Pair phone...", self.fleet_pair), ("Pause", lambda: self.fleet_dev("pause")), ("Resume", lambda: self.fleet_dev("resume")),
-                      ("Disable", lambda: self.fleet_dev("disable")), ("Enable", lambda: self.fleet_dev("enable")), ("Revoke", self.fleet_revoke)):
+                      ("Disable", lambda: self.fleet_dev("disable")), ("Enable", lambda: self.fleet_dev("enable")), ("Revoke", self.fleet_revoke),
+                      ("Phone dashboard (3 screens)", self.fleet_dashboard)):
             ttk.Button(b, text=t, command=fn).pack(side="left", padx=2)
         self.fl_devs = tk.Listbox(f, height=5, exportselection=False); self.fl_devs.pack(fill="x", pady=2); self._themed.append(self.fl_devs)
         b2 = ttk.Frame(f); b2.pack(fill="x", pady=4)
@@ -492,6 +493,13 @@ class App(tk.Tk):
             self.out(self.fl_out, json.dumps({k: st.get(k) for k in ("running", "bind", "network_enabled", "fingerprint_sha256", "job_counts")}, indent=2) +
                      ("\n" + note if note else "") + ("" if st.get("running") else "\nCoordinator is stopped (press Start)."))
         self.bg(get, done)
+
+    def fleet_dashboard(self):
+        # Runs as the logged-in desktop user (this process); the dashboard refuses root and a missing display itself.
+        try:
+            subprocess.Popen(["/usr/local/bin/victor-phone-dash"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            messagebox.showerror("Phone dashboard", f"Could not start victor-phone-dash: {e}")
 
     def fleet_do(self, cmd):
         self.bg(lambda: ctl("fleet", cmd), lambda r: (self.out(self.fl_out, r if isinstance(r, str) else json.dumps(r, indent=2)), self.after(600, self.fleet_refresh)))

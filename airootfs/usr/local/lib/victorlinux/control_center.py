@@ -1237,6 +1237,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(*APP.library_action(b))
             if p == "/api/fleet/action":
                 return self._send(*APP.fleet_action(b))
+            if p == "/api/phone/dashboard":
+                import victordashctl                 # starts the dashboard as this (logged-in desktop) user; refuses root / no display
+                r = victordashctl.launch_dashboard()
+                return self._send(200 if r.ok else 409, {"message": r.message} if r.ok else {"error": r.message})
             if p == "/api/llm/start":
                 return self._send(200, APP.start_llm(tc.load_settings()))
             if p == "/api/llm/stop":

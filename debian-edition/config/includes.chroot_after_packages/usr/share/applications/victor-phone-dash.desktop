@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=VictorLinux Phone Dashboard
+Comment=View and control up to three Android phones in one window, with offline voice commands
+Exec=/usr/local/bin/victor-phone-dash
+Icon=phone
+Categories=Utility;System;
+Terminal=false
+StartupNotify=true
