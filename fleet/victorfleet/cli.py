@@ -8,7 +8,7 @@ class UnixConn(http.client.HTTPConnection):
     def __init__(self, path):
         super().__init__("localhost"); self.path = path
     def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX); self.sock.settimeout(30); self.sock.connect(self.path)
+        self.sock = socket.socket(socket.AF_UNIX); self.sock.settimeout(60); self.sock.connect(self.path)
 
 
 def sock_path():
@@ -91,6 +91,75 @@ def serve(args):
     except OSError: pass
 
 
+def print_features(rows):
+    for d in rows:
+        f = d.get("features", {})
+        print(f"{d['id']}  {d['name']}  connected={d['connected']}")
+        for k in ("terminal", "shell_oneshot", "terminal_root", "messaging_sms", "messaging_email"):
+            x = f.get(k, {})
+            print(f"    {k:16} {x.get('state','?'):28} {x.get('action') or ''}")
+
+
+def _open(a, mode, command=None):
+    cols, rows = 80, 24
+    try:
+        sz = os.get_terminal_size(); cols, rows = sz.columns, sz.lines
+    except OSError:
+        pass
+    who = "victorlinux:" + (os.environ.get("USER") or "owner") + "@" + socket.gethostname()
+    return call("POST", "/terminal", {"device": a.device, "desktop": who, "mode": mode, "privilege": "root" if a.privileged else "user",
+                                      "command": command, "cols": cols, "rows": rows})
+
+
+def cmd_terminal(a):
+    from . import desktop
+    r = _open(a, "interactive")
+    rel = desktop.Relay(call, r["session_id"], r["attach_token"])
+    st = desktop.wait_open(rel, lambda s: print(s, file=sys.stderr))
+    if st != "open":
+        print(f"terminal not opened: {st}" + (f" ({rel.reason})" if rel.reason else ""), file=sys.stderr); return 4
+    print("connected. Press Enter then ~. to detach.", file=sys.stderr)
+    status = desktop.run_terminal(rel)
+    print(f"\r\nsession ended: {rel.state}" + (f" ({rel.reason})" if rel.reason else ""), file=sys.stderr)
+    return status if isinstance(status, int) else 0
+
+
+def cmd_exec(a):
+    import shlex
+    from . import desktop
+    cmd = a.shell if a.shell else (" ".join(shlex.quote(x) for x in a.argv) if a.argv else None)
+    if not cmd:
+        print("ERROR: give a command (after --) or --shell 'cmd'", file=sys.stderr); return 2
+    r = _open(a, "oneshot", cmd)
+    rel = desktop.Relay(call, r["session_id"], r["attach_token"])
+    st = desktop.wait_open(rel, lambda s: print(s, file=sys.stderr))
+    if st != "open":
+        print(f"command not run: {st}" + (f" ({rel.reason})" if rel.reason else ""), file=sys.stderr); return 4
+    status = desktop.run_oneshot(rel)
+    if status is None:
+        print(f"no exit status was reported ({rel.state}: {rel.reason})", file=sys.stderr); return 5
+    return status
+
+
+def cmd_message(a):
+    import base64, mimetypes
+    if a.mcmd == "list": return show(call("GET", "/drafts"))
+    if a.mcmd == "status": return show(call("GET", f"/drafts/{a.draft}"))
+    if a.mcmd == "retry": return show(call("POST", f"/drafts/{a.draft}/retry"))
+    body = a.body if a.body is not None else (open(a.body_file).read() if a.body_file else sys.stdin.read())
+    channel = a.mcmd.split("-", 1)[1]
+    draft = {"to": a.to, "body": body}
+    if channel == "email":
+        draft.update(cc=a.cc, bcc=a.bcc, subject=a.subject)
+        if a.account: draft["account_hint"] = a.account
+        if a.attach:
+            draft["attachments"] = [{"name": os.path.basename(p), "mime": mimetypes.guess_type(p)[0] or "application/octet-stream",
+                                     "data_b64": base64.b64encode(open(p, "rb").read()).decode()} for p in a.attach]
+    r = call("POST", "/drafts", {"device": a.device, "channel": channel, "draft": draft, "origin": "victorlinux:" + (os.environ.get("USER") or "owner")})
+    print("Draft handed to the phone for review. Nothing is sent until its owner taps Send there.", file=sys.stderr)
+    show(r)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="victor-fleet", description="VictorLinux fleet coordinator control")
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -119,6 +188,20 @@ def main(argv=None):
     ak = wsp.add_parser("apk-test"); ak.add_argument("--root", required=True); ak.add_argument("--apk", required=True); ak.add_argument("--package", required=True); ak.add_argument("--device", required=True)
     hd = wsp.add_parser("handoff"); hd.add_argument("--op-a", required=True); hd.add_argument("--op-b", required=True)
     hd.add_argument("--args-a", default="{}"); hd.add_argument("--args-b", default="{}"); hd.add_argument("--device-a"); hd.add_argument("--device-b")
+    tm = sp.add_parser("terminal", help="open a terminal on a paired phone (VictorSuite on the phone owns the shell; its owner must approve)")
+    tm.add_argument("device"); tm.add_argument("--privileged", action="store_true", help="request a root shell (needs the phone's separate privileged grant)")
+    ex = sp.add_parser("exec", help="run ONE command on a paired phone through VictorSuite and print its real output and exit status")
+    ex.add_argument("device"); ex.add_argument("--privileged", action="store_true"); ex.add_argument("--shell", help="command line as one string"); ex.add_argument("argv", nargs="*", help="command and arguments (after --)")
+    ts = sp.add_parser("terminals", help="list terminal sessions"); tc = sp.add_parser("terminal-close"); tc.add_argument("session")
+    ms = sp.add_parser("message", help="prepare an SMS/email draft and hand it to VictorSMS on a phone for the owner to review")
+    msp = ms.add_subparsers(dest="mcmd", required=True)
+    for ch in ("sms", "email"):
+        d = msp.add_parser("draft-" + ch); d.add_argument("device"); d.add_argument("--to", action="append", required=True)
+        d.add_argument("--body"); d.add_argument("--body-file")
+        if ch == "email":
+            d.add_argument("--cc", action="append", default=[]); d.add_argument("--bcc", action="append", default=[]); d.add_argument("--subject", default="")
+            d.add_argument("--account", help="sending account hint; the phone's owner picks the identity"); d.add_argument("--attach", action="append", default=[])
+    mst = msp.add_parser("status"); mst.add_argument("draft"); msp.add_parser("list"); mre = msp.add_parser("retry"); mre.add_argument("draft")
     a = ap.parse_args(argv)
 
     if a.cmd == "serve": return serve(a)
@@ -133,7 +216,14 @@ def main(argv=None):
         except OSError: print("no process log yet")
     elif a.cmd == "logs": show(call("GET", f"/events?n={a.n}"))
     elif a.cmd == "pair": show(call("POST", "/pair", {"ttl_s": a.ttl, "label": a.label}))
-    elif a.cmd == "devices": show(call("GET", "/status")["devices"])
+    elif a.cmd == "devices":
+        rows = call("GET", "/status")["devices"]
+        show(rows) if not os.environ.get("VICTOR_FLEET_BRIEF") else print_features(rows)
+    elif a.cmd == "terminals": show(call("GET", "/terminal"))
+    elif a.cmd == "terminal-close": show(call("POST", f"/terminal/{a.session}/close"))
+    elif a.cmd == "terminal": sys.exit(cmd_terminal(a))
+    elif a.cmd == "exec": sys.exit(cmd_exec(a))
+    elif a.cmd == "message": cmd_message(a)
     elif a.cmd in ("pause", "resume", "enable", "disable", "revoke", "unpair"): show(call("POST", f"/devices/{a.device}/{a.cmd}"))
     elif a.cmd == "config":
         from .server import load_config, save_config

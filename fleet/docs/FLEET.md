@@ -132,3 +132,47 @@ coordinator and protocol, not Android.
 UNVERIFIED: any physical phone; Android Keystore identity; foreground-service/WorkManager lifecycle; real LAN/VPN; root grants;
 battery/thermal readings on hardware; the Debian Tk tab rendering (syntax-checked only); a booted ISO containing the coordinator.
 Model-assisted planning is **not implemented**: submission is deterministic/manual and validated; nothing needs a model or tool calling.
+
+## Protocol 1.1: phone terminals, one-shot commands and message drafts
+
+Additive minor (`protocol.minor` 1). 1.0 peers keep working: an older phone simply does not report the new operations, and the
+coordinator shows each feature as `not_supported` with the action "update DroidCommand on the phone". The 1.0 fixtures are unchanged
+byte for byte; 1.1 adds `terminal_open|terminal_status|terminal_close|draft_deliver|draft_status` fixtures (valid and invalid).
+
+**Independent availability.** Every paired phone reports, per operation, `{available, granted, status?, detail?, min_version?}` with
+`status` one of `ready permission_needed owner_interaction_required version_outdated not_installed untrusted revoked unavailable`.
+Operations: `terminal.session`, `shell.oneshot`, `terminal.root` (privileged, separate), `message.draft.sms`, `message.draft.email`.
+`victor-fleet devices` / the Control Center show *terminal* and *messaging* separately, each with offline / permission / version /
+not-installed / untrusted states and an actionable next step.
+
+**Terminal (`victor-fleet terminal DEVICE`, Control Center → Open terminal).** The coordinator only sets up and relays; the shell is
+owned by VictorSuite on the phone after its owner approves.
+1. Desktop (local admin socket, mode 0600) asks for a session. The coordinator sends one ephemeral `terminal_open`
+   `{session_id, desktop, mode, privilege, cols, rows, nonce, expires_ms, binding}` where `binding = sha256(session, device, desktop,
+   privilege, mode, command, nonce)`.
+2. The phone shows the owner the peer, target, privilege (and command for a one-shot) and must echo `binding` in `terminal_status:open`.
+   A mismatch ends the session (`failed`). The phone must announce `open` before it produces any process output.
+3. Live bytes use `POST /v1/terminal/<sid>/exchange` (device credential, session must belong to that device) on the phone side and the
+   admin socket on the desktop side: sequenced chunks `data|resize|signal|eof|exit|close`, de-duplicated by `seq`, 16 KiB per chunk,
+   1 MiB backpressure bound. Ctrl-C is byte 0x03 for the remote pty; `signal INT` is also accepted.
+4. States: `requested → awaiting_approval → open → closed`, or `denied failed revoked expired disconnected`.
+   Revocation (`revoke`/`unpair`) ends a live session immediately. A phone that stops polling for 12 s ends the session
+   (`disconnected`): **input typed meanwhile is dropped, never queued or replayed, and a session never moves to another phone.**
+5. Not durable by design: `terminal_open/close` and `draft_deliver` use an in-memory, TTL-bound, hand-over-once queue, never the
+   outbox, jobs or retry tables. Terminal contents are held in memory only and are not written to the database, events or logs.
+
+**One-shot (`victor-fleet exec DEVICE -- cmd args…`).** Same path with `mode=oneshot`: owner approval names the target and the exact
+command; output is streamed back (`stdout|stderr` channels) with the real exit status. Takes no live input. It is not a job and is
+never retried. Privileged (`--privileged`) needs the phone's separate `terminal.root` grant and its own approval.
+
+**Message drafts (`victor-fleet message draft-sms|draft-email DEVICE …`).** The coordinator hands a draft to VictorSMS; it never sends
+and holds no mail credentials. States `pending → received → declined | submitted | failed`, or `unknown` (never acknowledged / no
+outcome in time). A retry re-offers the *same* draft id and hash; the phone de-duplicates by id, so a retry can only re-show a draft.
+Bodies, subjects, recipients and attachments live in memory until an outcome is known and are never stored or logged
+(only id, device, channel, recipient count, hash, state).
+
+VERIFIED (this repo, `fleet/tests/test_terminal_messaging.py`, simulated phone with a real pty/subprocess): relay in/out/resize/Ctrl-C/exit,
+denial, binding mismatch, input-before-approval dropped, revocation mid-session, disconnect without replay, duplicate-chunk de-dup,
+non-redelivery, expiry, contents absent from DB and events, one-shot output/exit status from the *selected* host, drafts
+received/declined/submitted-once/failed/unknown, retry cannot double-submit, validation of header injection and credentials, restart
+→ unknown, 1.1 fixtures, CLI `exec`/`message`/`devices`. UNVERIFIED: any real phone, VictorSuite, VictorSMS, Android.

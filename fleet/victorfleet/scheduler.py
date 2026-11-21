@@ -6,7 +6,7 @@ parked in `needs_review` instead of being replayed.
 """
 import json, time
 from .protocol import (ProtocolError, TERMINAL, OP_RE, ID_RE, MAX_ARGS_BYTES, envelope, validate_capabilities,
-                       now_ms, new_id)
+                       now_ms, new_id, TERMINAL_OPS)
 
 DEFAULTS = {
     "lease_s": 90,                 # assignment lease; refreshed by progress/heartbeat from the owning attempt
@@ -32,6 +32,11 @@ class Coordinator:
         self.cfg = dict(DEFAULTS, **(cfg or {}))
         self.clock = clock
         self.local_handlers = {}
+        self.ephemeral = {}                 # device_id -> [(expires_s, envelope)]   in memory ONLY: never durable, never redelivered
+        from .terminal import TerminalHub
+        from .messaging import DraftHub
+        self.terminals = TerminalHub(self, store, clock)
+        self.drafts = DraftHub(self, store, clock)
 
     def now(self):
         return int(self.clock() * 1000)
@@ -212,6 +217,8 @@ class Coordinator:
 
     # ------------------------------------------------------------------- tick
     def tick(self):
+        self.terminals.tick()
+        self.drafts.tick()
         t = self.now()
         self._expire_leases(t)
         self._resolve_dependencies(t)
@@ -341,10 +348,58 @@ class Coordinator:
                 self.enqueue(best["id"], msg, db)
                 self.s.event("assigned", job_id=j["id"], device_id=best["id"], detail=f"attempt {n}", db=db)
 
+    # -------------------------------------------------------------- features
+    def features(self, d):
+        """Per-device terminal / shell / messaging availability, computed independently from the LIVE capability report.
+        Each entry: {state, detail, action}. States: ready | offline | paused | disabled | revoked | not_supported |
+        permission_needed | owner_interaction_required | version_outdated | not_installed | untrusted | unavailable."""
+        caps = json.loads(d["caps_json"] or "{}")
+        ops = caps.get("operations", {})
+        out = {}
+        gate = None
+        if d["state"] != "paired":
+            gate = ("revoked", "this phone was revoked", "pair it again")
+        elif not d["enabled"]:
+            gate = ("disabled", "this phone is disabled in the fleet", "enable it in the fleet list")
+        elif d["paused"]:
+            gate = ("paused", "this phone is paused", "resume it")
+        elif not self.online(d):
+            gate = ("offline", "the phone is not connected to the coordinator", "open DroidCommand on the phone and check the network")
+        names = {"terminal": TERMINAL_OPS["terminal"], "shell_oneshot": TERMINAL_OPS["shell"], "terminal_root": "terminal.root",
+                 "messaging_sms": TERMINAL_OPS["sms"], "messaging_email": TERMINAL_OPS["email"]}
+        actions = {"permission_needed": "grant the permission in VictorSuite/VictorSMS on the phone",
+                   "owner_interaction_required": "approve on the phone when asked",
+                   "version_outdated": "update VictorSuite / VictorSMS / DroidCommand on the phone",
+                   "not_installed": "install VictorSuite (terminal, shell) or VictorSMS (messaging) on the phone",
+                   "untrusted": "re-pair the app: its signing certificate is not trusted", "unavailable": "see the detail"}
+        for key, op in names.items():
+            if gate:
+                out[key] = {"state": gate[0], "detail": gate[1], "action": gate[2]}
+                continue
+            o = ops.get(op)
+            if o is None:
+                out[key] = {"state": "not_supported", "detail": "this phone does not report the capability (older DroidCommand)",
+                            "action": "update DroidCommand on the phone"}
+                continue
+            st = o.get("status")
+            if st is None:
+                st = "ready" if o.get("available") and o.get("granted", True) else ("permission_needed" if o.get("available") else "unavailable")
+            if st == "ready" and o.get("owner_interaction_required"):
+                st = "ready"           # approval is per use; availability is still ready
+            out[key] = {"state": st, "detail": o.get("detail") or o.get("reason") or ("ready" if st == "ready" else st.replace("_", " ")),
+                        "action": None if st == "ready" else actions.get(st, "see the detail")}
+        return out
+
     # ---------------------------------------------------------------- outbox
     def enqueue(self, device_id, msg, db=None):
         d = db or self.s.db
         d.execute("INSERT INTO outbox(device_id,msg_id,body,created_ms) VALUES(?,?,?,?)", (device_id, msg["msg_id"], json.dumps(msg), self.now()))
+
+    def enqueue_ephemeral(self, device_id, msg, ttl_s=30):
+        """Live-only delivery for owner-approved interactive features (terminal_open/close, draft_deliver).
+        Held in memory, handed over at most once, dropped at expiry and on coordinator restart. Deliberately NOT in the durable
+        outbox, so shell input and message drafts are never retried or replayed after a reconnect."""
+        self.ephemeral.setdefault(device_id, []).append((self.clock() + ttl_s, msg))
 
     def drain(self, device_id, limit=32):
         """Messages not yet acked are redelivered (at-least-once); worker dedups by msg_id."""
@@ -353,7 +408,11 @@ class Coordinator:
             with self.s.tx() as db:
                 for r in rows:
                     db.execute("UPDATE outbox SET delivered_ms=? WHERE seq=?", (self.now(), r["seq"]))
-        return [json.loads(r["body"]) for r in rows]
+        out = [json.loads(r["body"]) for r in rows]
+        live = self.ephemeral.pop(device_id, [])
+        now = self.clock()
+        out.extend(m for exp, m in live if exp > now)       # popped: handed over once, whatever the phone does with it
+        return out
 
     def ack_outbox(self, device_id, msg_ids):
         if msg_ids:
@@ -517,6 +576,12 @@ class Coordinator:
     def _on_artifact_offer(self, dev, env, p):
         self._attempt_for(dev, p)    # authorization only; bytes arrive via the artifact endpoint
 
+    def _on_terminal_status(self, dev, env, p):
+        self.terminals.on_status(dev, p)
+
+    def _on_draft_status(self, dev, env, p):
+        self.drafts.on_status(dev, p)
+
     def _on_node_message(self, dev, env, p):
         """Coordinator-relayed node messaging. Peers cannot expand another phone's permissions: the body is
         delivered as data under a topic; only job assignments from the coordinator can cause execution."""
@@ -540,6 +605,8 @@ class Coordinator:
             self.s.event("device_revoked", "warn", device_id=device_id, detail=reason, db=db)
         for a in self._active_attempts(device_id):
             self._lose_attempt(a, "device revoked", device_revoked=True)
+        self.ephemeral.pop(device_id, None)
+        self.terminals.close_for_device(device_id, "device revoked by the owner")     # revocation ends a live shell at once
 
     # ----------------------------------------------------------------- report
     def report(self, pid):
