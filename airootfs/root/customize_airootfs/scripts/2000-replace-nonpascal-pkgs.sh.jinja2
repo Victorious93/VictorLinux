@@ -4,7 +4,7 @@ set -eu
 export PIP_EXTRA_INDEX_URL="https://sasha0552.github.io/pascal-pkgs-ci/"
 replace_package() {
   package=$1
-  for dir in $(find /home/victor -type d -wholename "*/site-packages/$package-*.dist-info"); do
+  find /home/victor -type d -wholename "*/site-packages/$package-*.dist-info" | while IFS= read -r dir; do
     interpreter=$(realpath -s "$dir/../../../../bin/python")
     transient-package install --interpreter "$interpreter" --source "$package" --target "$package-pascal"
   done
