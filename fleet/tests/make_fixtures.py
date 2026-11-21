@@ -24,6 +24,12 @@ valid = {
  "cancel": env("cancel", D, W, {"job_id": "plan-x.hash0", "attempt": 1, "reason": "owner cancelled"}, "m-cancel-1"),
  "cancel_ack": env("cancel_ack", W, D, {"job_id": "plan-x.hash0", "attempt": 1, "state": "stopped"}, "m-cack-1"),
  "node_message": env("node_message", W, D, {"to_device": "dev-ba9876543210", "topic": "hint", "body": {"note": "output ready"}}, "m-node-1"),
+ "hello_messaging_screen_terminal": env("hello", W, D, {"app_version": "droidcommand-0.1.0-fixture", "capabilities": {"operations": {"hash_files": {"available": True, "granted": True}, "message.draft": {"available": True, "granted": True}, "screen.view": {"available": True, "granted": False}, "screen.control": {"available": False}, "terminal.open": {"available": True, "granted": True, "owner_interaction_required": True}}, "root": {"available": False, "granted": False}, "device_state": state, "max_concurrent": 2}, "running": []}, "m-hello-3"),
+ "message_draft_assignment": env("assignment", D, W, {"job_id": "plan-m.draft", "attempt": 1, "fence": 1, "op": "message.draft", "args": {"draft_id": "dr-0001", "kind": "email", "to": ["jordan@example.com"], "cc": [], "bcc": [], "subject": "Hello", "body": "fixture body", "identity_hint": "work@example.com"}, "inputs": [], "lease_expires_ms": 1790000090000, "deadline_ms": 1790003600000, "requires_root": False, "ui_exclusive": True, "idempotent": False}, "m-draft-1"),
+ "message_draft_progress_received": env("progress", W, D, {"job_id": "plan-m.draft", "attempt": 1, "note": "draft_received"}, "m-draft-2"),
+ "message_draft_complete_submitted": env("complete", W, D, {"job_id": "plan-m.draft", "attempt": 1, "result": {"draft_id": "dr-0001", "status": "submitted"}}, "m-draft-3"),
+ "message_draft_complete_declined": env("complete", W, D, {"job_id": "plan-m.draft", "attempt": 1, "result": {"draft_id": "dr-0001", "status": "declined"}}, "m-draft-4"),
+ "message_draft_fail_unknown": env("fail", W, D, {"job_id": "plan-m.draft", "attempt": 1, "error": {"code": "deadline_exceeded", "message": "link lost after submit"}, "side_effects": "possible"}, "m-draft-5"),
 }
 bad = {
  "wrong_protocol_major": ("unsupported_protocol", dict(valid["heartbeat"], protocol={"major": 2, "minor": 0})),

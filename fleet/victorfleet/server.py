@@ -368,6 +368,25 @@ class AdminHandler(Base):
         if k == ("GET", "jobs"):
             return [{x: r[x] for x in ("id", "plan_id", "op", "state", "priority", "attempts", "note")} for r in
                     s.store.q("SELECT * FROM jobs " + ("WHERE plan_id=? " if "plan" in q else "") + "ORDER BY created_ms DESC LIMIT 500", tuple(q.get("plan", [])))]
+        if k == ("POST", "messages") and len(parts) == 1:
+            from . import messaging
+            d = messaging.build_draft(body["kind"], body["to"], body["body"], body.get("cc", ()), body.get("bcc", ()),
+                                      body.get("subject", ""), body.get("identity_hint", ""))
+            if not s.store.one("SELECT 1 FROM devices WHERE id=? AND state='paired'", (body["device"],)):
+                raise ProtocolError("bad_request", "unknown or unpaired device")
+            pid = c.submit_plan(messaging.draft_plan(body["device"], d), auto_approve=True)
+            return {"draft_id": d["draft_id"], "plan": pid, "job": f"{pid}.draft", "state": "queued"}
+        if k == ("GET", "messages") and len(parts) == 2:
+            from . import messaging
+            for row in s.store.q("SELECT * FROM jobs WHERE op='message.draft' ORDER BY created_ms DESC LIMIT 500"):
+                a = json.loads(row["args_json"] or "{}")
+                if a.get("draft_id") == parts[1]:
+                    st, detail = messaging.draft_status(row)
+                    return {"draft_id": parts[1], "job": row["id"], "state": st, "detail": detail}
+            raise ProtocolError("unknown_job", "no such draft")
+        if k == ("GET", "capabilities"):
+            from . import messaging
+            return [{"id": d["id"], "name": d["name"], "features": messaging.feature_states(d)} for d in s.status()["devices"] if d["state"] == "paired"]
         if k == ("POST", "jobs") and len(parts) == 3 and parts[2] == "cancel": return {"state": c.cancel_job(parts[1])}
         if k == ("POST", "devices") and len(parts) == 3:
             did, act = parts[1], parts[2]

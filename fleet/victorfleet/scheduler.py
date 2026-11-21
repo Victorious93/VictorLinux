@@ -5,6 +5,7 @@ claim: delivery is at-least-once, results are fenced by (job_id, attempt), and u
 parked in `needs_review` instead of being replayed.
 """
 import json, time
+from . import messaging
 from .protocol import (ProtocolError, TERMINAL, OP_RE, ID_RE, MAX_ARGS_BYTES, envelope, validate_capabilities,
                        now_ms, new_id)
 
@@ -158,6 +159,15 @@ class Coordinator:
                         "unassignable_now": (not cands) and not j["coordinator_local"]})
         return {"plan": pid, "state": p["state"], "title": p["title"], "jobs": out}
 
+    def _scrub_finished_messages(self):
+        """Message bodies live in the store only while the draft is in flight; every terminal path ends up scrubbed."""
+        marks = ",".join("?" * len(TERMINAL))
+        rows = self.s.q(f"SELECT id FROM jobs WHERE op LIKE 'message.%' AND state IN ({marks}) AND args_json LIKE '%\"body\"%'", tuple(TERMINAL))
+        if rows:
+            with self.s.tx() as db:
+                for r in rows:
+                    messaging.scrub_job(db, r["id"])
+
     # ---------------------------------------------------------------- devices
     def _devices(self):
         return self.s.q("SELECT * FROM devices WHERE state='paired'")
@@ -218,6 +228,7 @@ class Coordinator:
         self._expire_deadlines(t)
         self._run_local(t)
         self._assign(t)
+        self._scrub_finished_messages()
 
     def _expire_leases(self, t):
         for a in self.s.q("SELECT * FROM attempts WHERE state IN ('assigned','running','awaiting_approval','cancelling') AND lease_expires_ms<?", (t,)):
@@ -485,6 +496,7 @@ class Coordinator:
             db.execute("UPDATE jobs SET state=?, result_json=?, note=?, updated_ms=? WHERE id=?", (final, json.dumps(p["result"]), note, self.now(), p["job_id"]))
             db.execute("UPDATE attempts SET state='done', finished_ms=? WHERE job_id=? AND n=?", (self.now(), p["job_id"], p["attempt"]))
             db.execute("UPDATE artifacts SET owner_job_final=1 WHERE job_id=? AND attempt=?", (p["job_id"], p["attempt"]))
+            messaging.scrub_job(db, p["job_id"])
             self.s.event("job_succeeded", job_id=p["job_id"], device_id=dev["id"], detail=f"attempt {p['attempt']}", db=db)
 
     def _on_fail(self, dev, env, p):
@@ -498,11 +510,13 @@ class Coordinator:
                 new = "cancelled"
             elif retry_ok:
                 new = "queued"
-            elif side in ("possible",) and not j["idempotent"] and err["code"] == "internal":
+            elif side in ("possible",) and not j["idempotent"] and (err["code"] == "internal" or j["op"].startswith("message.")):
                 new = "needs_review"
             else:
                 new = "failed"
             db.execute("UPDATE jobs SET state=?, error_json=?, updated_ms=? WHERE id=?", (new, json.dumps(err), self.now(), p["job_id"]))
+            if new != "queued":
+                messaging.scrub_job(db, p["job_id"])
             self.s.event("job_failed", "warn", p["job_id"], dev["id"], f"{err['code']} -> {new}", db=db)
 
     def _on_cancel_ack(self, dev, env, p):

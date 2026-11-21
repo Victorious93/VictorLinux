@@ -119,6 +119,14 @@ def main(argv=None):
     ak = wsp.add_parser("apk-test"); ak.add_argument("--root", required=True); ak.add_argument("--apk", required=True); ak.add_argument("--package", required=True); ak.add_argument("--device", required=True)
     hd = wsp.add_parser("handoff"); hd.add_argument("--op-a", required=True); hd.add_argument("--op-b", required=True)
     hd.add_argument("--args-a", default="{}"); hd.add_argument("--args-b", default="{}"); hd.add_argument("--device-a"); hd.add_argument("--device-b")
+    sp.add_parser("capabilities", help="per-phone messaging / screen view / manual control / terminal availability, each independent")
+    ms = sp.add_parser("message", help="send an SMS or email DRAFT to a phone; only the phone owner's Send action submits it")
+    msp = ms.add_subparsers(dest="mc", required=True)
+    md = msp.add_parser("draft"); md.add_argument("--device", required=True); md.add_argument("--kind", choices=["sms", "email"], required=True)
+    md.add_argument("--to", action="append", required=True); md.add_argument("--cc", action="append", default=[]); md.add_argument("--bcc", action="append", default=[])
+    md.add_argument("--subject", default=""); md.add_argument("--identity", default="", help="account label on the phone, e.g. work@example.com (never a password)")
+    md.add_argument("--body-file", required=True, help="file with the message body, or - for stdin (bodies are never taken from argv)")
+    mst = msp.add_parser("status"); mst.add_argument("draft_id")
     a = ap.parse_args(argv)
 
     if a.cmd == "serve": return serve(a)
@@ -153,6 +161,18 @@ def main(argv=None):
     elif a.cmd == "jobs": show(call("GET", "/jobs" + (f"?plan={a.plan}" if a.plan else "")))
     elif a.cmd == "cancel": show(call("POST", f"/plans/{a.target}/cancel") if a.target.startswith("plan-") and "." not in a.target else call("POST", f"/jobs/{a.target}/cancel"))
     elif a.cmd == "report": show(call("GET", f"/plans/{a.plan}/report"))
+    elif a.cmd == "capabilities":
+        for d in call("GET", "/capabilities"):
+            print(f"{d['name']}  ({d['id']})")
+            for f, v in d["features"].items():
+                print(f"  {f:15} {v['state']:17} {v['fix']}")
+    elif a.cmd == "message" and a.mc == "draft":
+        body = sys.stdin.read() if a.body_file == "-" else open(a.body_file, encoding="utf-8").read()
+        r = call("POST", "/messages", {"device": a.device, "kind": a.kind, "to": a.to, "cc": a.cc, "bcc": a.bcc, "subject": a.subject,
+                                       "identity_hint": a.identity, "body": body})
+        print(f"Draft {r['draft_id']} queued for the phone. The owner must review it there and press Send.\nCheck: victor-fleet message status {r['draft_id']}")
+    elif a.cmd == "message" and a.mc == "status":
+        r = call("GET", f"/messages/{a.draft_id}"); print(f"{r['state']}: {r['detail']}")
     elif a.cmd == "workflow":
         from . import workflows
         if a.wf == "batch-hash":
