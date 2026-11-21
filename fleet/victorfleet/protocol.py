@@ -157,7 +157,7 @@ def validate_plan_manifest(plan):
     a reviewed batch once, it is never needed to run anything."""
     if not isinstance(plan, dict):
         raise ProtocolError("bad_request", "plan must be an object")
-    _id(plan, "plan_id")
+    plan_id = _id(plan, "plan_id")
     jobs = _need(plan, "jobs", list)
     if not 1 <= len(jobs) <= MAX_PLAN_JOBS:
         raise ProtocolError("too_large" if len(jobs) > MAX_PLAN_JOBS else "bad_request", f"plan must list 1..{MAX_PLAN_JOBS} jobs")
@@ -166,6 +166,8 @@ def validate_plan_manifest(plan):
         if not isinstance(j, dict):
             raise ProtocolError("bad_request", "plan job must be an object")
         jid = _id(j, "job_id")
+        if not jid.startswith(plan_id + "."):
+            raise ProtocolError("bad_request", "plan lists a job that is not part of this plan")
         if jid in seen:
             raise ProtocolError("bad_request", "plan lists the same job twice")
         seen.add(jid)

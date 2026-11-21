@@ -556,6 +556,7 @@ class TestPlanManifest(Base):
             with self.assertRaises(ProtocolError): validate_plan_manifest(plan)
         bad(plan_id="x y"); bad(jobs=[]); bad(jobs="no")
         bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": {}}] * 2)
+        bad(jobs=[{"job_id": "q.a", "op": "hash_files", "args": {}}])           # a job of some other plan
         bad(jobs=[{"job_id": "p.a", "op": "Hash Files", "args": {}}])
         bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": []}])
         bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": {}, "requires_root": "no"}])
