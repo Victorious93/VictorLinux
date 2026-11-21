@@ -1,0 +1,28 @@
+# Phone microphone, PC detect and three-phone control (owner guide)
+
+Work by Victorious. Status words below are literal: **Implemented**, **Built**, **JVM/host-tested**, **Emulator-tested**, **Physically verified**. Nothing here has been run on a physical phone.
+
+## Choose a microphone
+`victor-mic list | status | use default | use pc <stable-id> | use phone <DEVICE> --provider droidcommand|keyboard | prefer-phone on --device D --provider P | virtual on [--set-default]`.
+Settings live in `~/.config/victorlinux/mic.json` (0600) and are keyed by stable device identity and provider. A manual PC or phone choice is **never** replaced silently by a hot-plugged headset; only the explicit "use my preferred phone when no PC mic is available" fallback can substitute, and only with live, unexpired consent. A stored preference can never start capture: consent exists only in memory on the PC and expires (default 1 h, max 8 h) or on reboot.
+
+## Pair a phone as a microphone
+1. On the PC: `victor-mic serve --bind <LAN-or-VPN-address> --offer Nord:nord1:keyboard` (or `:droidcommand`). It prints one `vmic1;…` offer line (contains a one-time secret; show it only to the phone owner). Never bind a public address.
+2. Phone: **Victorious Keyboard → PC microphone** (toolbar tile or Settings → Tools) or **DroidCommand-AI → My PC → Use this phone as microphone**. Paste the line, allow the microphone on that screen, start. A notification names the PC and has Stop and Mute.
+3. Creating a new offer for the same handset releases the other app (explicit handover on one phone).
+4. Optional: `--virtual-mic` publishes the phone as a user-session source `victor_phone_mic` for any Linux recorder (PulseAudio/pipewire-pulse). It is **not** made the system default unless you also pass `--set-default`; stopping removes it and restores the old default.
+Stop/revoke: Stop on the phone, or end `serve`; expiry also ends it.
+
+## What is and is not covered
+| Item | Implemented | Built | JVM/host-tested | Emulator | Physical |
+|---|---|---|---|---|---|
+| Mic settings/resolution, hot-plug rules, consent expiry, handover (Python) | yes | n/a | yes (25 tests) | – | – |
+| VMIC1 stream: pinned TLS + HMAC bound to PC/phone/app, bounded buffer, replay drop | yes | n/a | yes, incl. Kotlin client ↔ real Python receiver | – | – |
+| Virtual mic module handling | yes | n/a | with a fake `pactl` only | – | – |
+| Voice grammar, echo guard, tile model, input routing/epochs, coordinate mapping | yes | n/a | yes | – | – |
+| Detect PC / read-aloud policy (privacy filters) | yes | n/a | yes with a fake accessibility backend | – | – |
+| AT-SPI backend | yes | n/a | **no** (no desktop session here) | – | – |
+| DroidCommand / Keyboard Android shells | yes | see handoff | – | – | – |
+| Settings → Audio → Microphone GUI in both Control Centers, 3-tile live GUI, PTT button/shortcut, rustdeskV phone-to-phone | **not implemented** | – | – | – | – |
+
+See the handoff message for the shortest remaining checks.
