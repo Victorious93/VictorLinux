@@ -7,7 +7,7 @@ from .store import Store, sha256_hex
 
 DEFAULT_CONFIG = {"bind": "127.0.0.1", "port": 19970, "network_enabled": False, "allow_wildcard": False,
                   "max_artifact_bytes": 256 << 20, "artifact_quota_bytes": 2 << 30, "plan_approval": True,
-                  "max_devices": 4, "long_poll_max_s": 25}
+                  "share_plan_with_phones": False, "max_devices": 4, "long_poll_max_s": 25}
 ARTIFACT_LOCK = threading.Lock()
 
 
@@ -46,7 +46,8 @@ class FleetService:
         self.cfg = load_config(self.dir)
         self.cfg.update(cfg_override or {})
         self.store = Store(self.dir)
-        self.coord = Coordinator(self.store, {"plan_approval": self.cfg["plan_approval"]}, clock=clock)
+        self.coord = Coordinator(self.store, {"plan_approval": self.cfg["plan_approval"],
+                                           "share_plan_with_phones": self.cfg["share_plan_with_phones"]}, clock=clock)
         from . import workflows
         workflows.register(self.coord)
         self.bind = effective_bind(self.cfg)
@@ -159,6 +160,7 @@ class FleetService:
         return {"running": True, "bind": f"{self.bind}:{self.port}", "network_enabled": self.cfg["network_enabled"],
                 "fingerprint_sha256": self.fingerprint, "spki_sha256": self.spki, "persistence": self.persistence, "data_dir": self.dir,
                 "devices": devs, "job_counts": counts, "plan_approval_required": self.cfg["plan_approval"],
+                "share_plan_with_phones": self.cfg["share_plan_with_phones"],
                 "durability_warning": None if self.persistence.get("durable") in (True, None) else
                     "State is NOT durable: " + self.persistence["reason"]}
 
