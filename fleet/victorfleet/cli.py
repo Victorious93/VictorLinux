@@ -133,7 +133,8 @@ def cmd_exec(a):
     r = _open(a, "oneshot", cmd)
     rel = desktop.Relay(call, r["session_id"], r["attach_token"])
     st = desktop.wait_open(rel, lambda s: print(s, file=sys.stderr))
-    if st != "open":
+    finished_fast = st == "closed" and (rel.exit_status is not None or any(c["kind"] == "exit" for c in rel.backlog))   # ran and ended before we looked
+    if st != "open" and not finished_fast:
         print(f"command not run: {st}" + (f" ({rel.reason})" if rel.reason else ""), file=sys.stderr); return 4
     status = desktop.run_oneshot(rel)
     if status is None:

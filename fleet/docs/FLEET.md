@@ -153,7 +153,7 @@ owned by VictorSuite on the phone after its owner approves.
 2. The phone shows the owner the peer, target, privilege (and command for a one-shot) and must echo `binding` in `terminal_status:open`.
    A mismatch ends the session (`failed`). The phone must announce `open` before it produces any process output.
 3. Live bytes use `POST /v1/terminal/<sid>/exchange` (device credential, session must belong to that device) on the phone side and the
-   admin socket on the desktop side: sequenced chunks `data|resize|signal|eof|exit|close`, de-duplicated by `seq`, 16 KiB per chunk,
+   admin socket on the desktop side: sequenced chunks `data|resize|signal|eof|exit|close`, de-duplicated by `seq` (the relay answers the phone with `ack` = highest phone chunk it consumed; the phone resends anything above it and, while the session is not yet `open`, the relay consumes nothing), 16 KiB per chunk,
    1 MiB backpressure bound. Ctrl-C is byte 0x03 for the remote pty; `signal INT` is also accepted.
 4. States: `requested → awaiting_approval → open → closed`, or `denied failed revoked expired disconnected`.
    Revocation (`revoke`/`unpair`) ends a live session immediately. A phone that stops polling for 12 s ends the session

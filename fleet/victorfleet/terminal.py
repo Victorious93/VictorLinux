@@ -209,12 +209,12 @@ class TerminalHub:
         with s.lock:
             s.last_phone = now
             if s.state in TERMINAL_FINAL and not s.to_phone.pending():
-                return {"state": s.state, "reason": s.reason, "chunks": []}
+                return {"state": s.state, "reason": s.reason, "ack": s.phone_seen, "chunks": []}
             s.to_phone.ack(int(body.get("ack", 0) or 0))
             if s.state != "open":
                 # Not open (yet): do NOT consume the phone's chunks. They are retried with the same seq once the relay says `open`, so
                 # nothing is lost to a status/relay race, and nothing from an unapproved or finished session is ever forwarded.
-                return {"state": s.state, "reason": s.reason, "chunks": s.to_phone.pending()}
+                return {"state": s.state, "reason": s.reason, "ack": s.phone_seen, "chunks": s.to_phone.pending()}
             for c in body.get("chunks", [])[:64]:
                 validate_chunk(c)
                 if c["seq"] <= s.phone_seen:
@@ -232,7 +232,7 @@ class TerminalHub:
                 if s.to_desktop.bytes > self.cfg["max_unacked_bytes"]:
                     self._finish(s, "failed", "desktop is not reading output (buffer limit)")
                     break
-            return {"state": s.state, "reason": s.reason, "chunks": s.to_phone.pending()}
+            return {"state": s.state, "reason": s.reason, "ack": s.phone_seen, "chunks": s.to_phone.pending()}
 
     def desktop_exchange(self, sid, token, body):
         s = self._get(sid)
