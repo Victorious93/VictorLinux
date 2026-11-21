@@ -107,6 +107,7 @@ def main(argv=None):
     cf.add_argument("--enable-network", metavar="ADDR", help="serve on this explicit LAN/VPN address instead of loopback")
     cf.add_argument("--disable-network", action="store_true"); cf.add_argument("--port", type=int)
     cf.add_argument("--plan-approval", choices=["on", "off"])
+    cf.add_argument("--share-plan", choices=["on", "off"], help="let phones see the plan's job list so their owner can approve a reviewed batch once (default off)")
     sb = sp.add_parser("submit", help="submit a plan (JSON file or - for stdin)"); sb.add_argument("file"); sb.add_argument("--approve", action="store_true")
     pl = sp.add_parser("plans"); rv = sp.add_parser("review"); rv.add_argument("plan")
     ap_ = sp.add_parser("approve"); ap_.add_argument("plan")
@@ -143,7 +144,8 @@ def main(argv=None):
         if a.disable_network: c.update(network_enabled=False)
         if a.port: c["port"] = a.port
         if a.plan_approval: c["plan_approval"] = a.plan_approval == "on"
-        if a.enable_network or a.disable_network or a.port or a.plan_approval: save_config(d, c)
+        if a.share_plan: c["share_plan_with_phones"] = a.share_plan == "on"
+        if a.enable_network or a.disable_network or a.port or a.plan_approval or a.share_plan: save_config(d, c)
         show(c)
     elif a.cmd == "submit":
         spec = json.load(sys.stdin if a.file == "-" else open(a.file)); show(call("POST", "/plans", {"spec": spec, "auto_approve": a.approve or None}))

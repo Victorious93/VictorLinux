@@ -33,6 +33,8 @@ submit plans review approve jobs cancel report workflow batch-hash|apk-test|hand
 
 * Networking is **local-only until you enable it**. `--enable-network ADDR` binds that one address; `0.0.0.0` needs a
   deliberate `allow_wildcard` in `config.json`. Opening a router port is out of scope and never done.
+* `config --share-plan on|off` lets phones see their plan's job list so their owner can approve a reviewed batch once (default **off**;
+  see "Plan manifest").
 * Plans are **reviewed before first dispatch** by default (`config --plan-approval on|off`). `review` shows, per job, which phones
   could take it *right now*, and flags jobs nobody can run.
 
@@ -74,6 +76,24 @@ Capabilities are **live** and typed per operation: `available` (an executor real
 thermal, free storage, foreground-busy. A configured flag or installed package is not an executable capability.
 Inference location, model tool support, prompt-cache support, phone-worker operations and desktop-session availability are separate
 capabilities and never share a flag.
+
+### Plan manifest (optional, **off by default**)
+
+An `assignment` may carry one extra object, `plan`, listing every phone job in the plan it belongs to:
+`{plan_id, jobs:[{job_id, op, args, requires_root?}]}` (2–25 jobs, whole manifest ≤ 96 KiB). It exists for one purpose: a phone's owner can
+review the plan once and approve a batch, instead of tapping once per job. **The coordinator never needs it and a phone never needs it to
+run a job.**
+
+* Off unless the owner runs `config --share-plan on` (`share_plan_with_phones` in `config.json`; shown by `status`). Read on every
+  assignment, so switching it takes effect on the next assignment sent.
+* Sent only when the plan has between 2 and 25 phone jobs; coordinator-local jobs (`coordinator.*`) are never listed; a manifest over the
+  size cap is dropped and the job is assigned exactly as before. Each job's `args` are the same args its own assignment will carry, because
+  a phone binds its owner's approval to exactly what it was shown.
+* The manifest is **information, not authority**. It cannot assign a job, widen a permission or approve anything. A phone ignores a
+  manifest it cannot validate (fixtures `plan_ignored/*` pin which ones) and still runs the assignment; whether to offer a batch at all, and
+  which jobs it can ever cover, is decided on the phone and can be switched off there independently.
+* Fixtures: `assignment_with_plan.json` (valid) and `plan_ignored/` (valid assignments with unusable plans), byte-identical in the DroidCommand
+  repo like every other fixture.
 
 ### Identity and pairing
 
@@ -125,7 +145,8 @@ VERIFIED (automated, build host): enrollment (single-use/expiry/binding/pinning/
 fixture validation, capability-aware assignment incl. root/battery/thermal/storage/UI-exclusivity/pinning, cycle detection,
 leases + fencing + stale results, lost-phone semantics, reconnect reconciliation, restart recovery, de-duplication, cancellation states,
 approvals, artifact integrity/quotas/traversal, three-phone batch-hash with real SHA-256, APK verdict rules, node-message relay,
-persistence-durability reporting, Arch web Control Center tab driven in headless Chromium.
+persistence-durability reporting, Arch web Control Center tab driven in headless Chromium, the optional plan manifest (default off, switch
+effective on the next assignment, job cap, size cap, coordinator-local jobs excluded, validator and golden fixtures).
 Workers in these tests are **simulated** (a Python worker and the real Kotlin `core-fleet-worker` over real HTTPS) — they prove the
 coordinator and protocol, not Android.
 

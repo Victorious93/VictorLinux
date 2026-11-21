@@ -2,7 +2,7 @@ import hashlib, io, json, os, sys, tarfile, tempfile, time, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 from victorfleet.server import FleetService, effective_bind, DEFAULT_CONFIG
-from victorfleet.protocol import ProtocolError
+from victorfleet.protocol import ProtocolError, validate_plan_manifest, MAX_PLAN_JOBS
 from victorfleet import workflows, persistence
 from simworker import SimWorker
 
@@ -463,13 +463,117 @@ class TestArchStateFile(unittest.TestCase):
         self.assertTrue(r["writable"]); self.assertTrue(r["path"].endswith("/fleet"))
 
 
+class TestPlanManifest(Base):
+    """The optional `plan` object on an assignment: OFF by default, never needed to run a job, only ever additive."""
+    def _assignments(self, w):
+        w.exchange(); return {m["payload"]["job_id"]: m["payload"] for m in w.take("assignment")}
+
+    def _jobs(self, n=3):
+        return [{"key": f"h{i}", "op": "hash_files", "args": {"shard": f"s{i}.tar", "algorithm": "sha256"}} for i in range(n)]
+
+    def test_off_by_default_assignments_carry_no_plan(self):
+        from victorfleet.scheduler import DEFAULTS
+        self.assertFalse(DEFAULTS["share_plan_with_phones"])         # the scheduler's own default, for a Coordinator built with no config
+        self.assertFalse(DEFAULT_CONFIG["share_plan_with_phones"])   # and the service's default, which is what a real install runs
+        self.assertFalse(self.coord.cfg["share_plan_with_phones"])
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        self.plan(self._jobs()); self.tick()
+        got = self._assignments(w)
+        self.assertEqual(len(got), 3)
+        for a in got.values(): self.assertNotIn("plan", a)
+
+    def test_on_sends_every_phone_job_with_exact_args(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        pid = self.plan(self._jobs()); self.tick()
+        got = self._assignments(w)
+        self.assertTrue(got)
+        for a in got.values():
+            plan = a["plan"]
+            self.assertEqual(plan["plan_id"], pid)
+            self.assertEqual({j["job_id"] for j in plan["jobs"]}, {f"{pid}.h{i}" for i in range(3)})   # the whole plan, not just this phone's share
+            mine = [j for j in plan["jobs"] if j["job_id"] == a["job_id"]][0]
+            self.assertEqual(mine["args"], a["args"])               # the args the phone was shown are the args it is assigned
+            self.assertEqual(mine["op"], a["op"])
+            validate_plan_manifest(plan)
+
+    def test_switch_takes_effect_on_the_next_assignment(self):
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=1)
+        self.plan(self._jobs(4)); self.tick()
+        first = list(self._assignments(w).values())[0]
+        self.assertNotIn("plan", first)
+        self.coord.cfg["share_plan_with_phones"] = True
+        w.exchange([w.msg("complete", {"job_id": first["job_id"], "attempt": first["attempt"], "result": {}, "artifacts": []})])
+        self.tick()
+        second = list(self._assignments(w).values())[0]
+        self.assertIn("plan", second)
+
+    def test_single_job_plan_gets_no_manifest(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        self.plan(self._jobs(1)); self.tick()
+        for a in self._assignments(w).values(): self.assertNotIn("plan", a)
+
+    def test_coordinator_local_jobs_are_not_listed(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        pid = self.plan(self._jobs(2) + [{"key": "m", "op": "coordinator.merge_manifests", "deps": ["h0", "h1"]}])
+        self.tick()
+        for a in self._assignments(w).values():
+            ids = {j["job_id"] for j in a["plan"]["jobs"]}
+            self.assertEqual(ids, {f"{pid}.h0", f"{pid}.h1"})
+
+    def test_plan_over_the_job_cap_gets_no_manifest(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        self.plan(self._jobs(MAX_PLAN_JOBS + 1)); self.tick()
+        got = self._assignments(w)
+        self.assertTrue(got)                                       # the jobs still run
+        for a in got.values(): self.assertNotIn("plan", a)
+
+    def test_oversized_manifest_is_dropped_but_jobs_still_run(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}}, max_concurrent=3)
+        big = [{"key": f"h{i}", "op": "hash_files", "args": {"note": "x" * 12000}} for i in range(10)]   # ~120 KB of args in total
+        self.plan(big); self.tick()
+        got = self._assignments(w)
+        self.assertTrue(got)
+        for a in got.values(): self.assertNotIn("plan", a)
+
+    def test_root_flag_is_reported_per_job(self):
+        self.coord.cfg["share_plan_with_phones"] = True
+        w = self.worker(ops={"hash_files": {"available": True, "granted": True}, "fs.read_private": {"available": True, "granted": True}}, root=True, max_concurrent=3)
+        pid = self.plan([{"key": "a", "op": "hash_files"}, {"key": "r", "op": "fs.read_private", "requires_root": True}]); self.tick()
+        plan = list(self._assignments(w).values())[0]["plan"]
+        flags = {j["job_id"]: j["requires_root"] for j in plan["jobs"]}
+        self.assertEqual(flags, {f"{pid}.a": False, f"{pid}.r": True})
+
+    def test_validator_rejects_unusable_manifests(self):
+        good = {"plan_id": "p", "jobs": [{"job_id": "p.a", "op": "hash_files", "args": {}}]}
+        validate_plan_manifest(good)
+        def bad(**over):
+            plan = json.loads(json.dumps(good)); plan.update(over)
+            with self.assertRaises(ProtocolError): validate_plan_manifest(plan)
+        bad(plan_id="x y"); bad(jobs=[]); bad(jobs="no")
+        bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": {}}] * 2)
+        bad(jobs=[{"job_id": "q.a", "op": "hash_files", "args": {}}])           # a job of some other plan
+        bad(jobs=[{"job_id": "p.a", "op": "Hash Files", "args": {}}])
+        bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": []}])
+        bad(jobs=[{"job_id": "p.a", "op": "hash_files", "args": {}, "requires_root": "no"}])
+        with self.assertRaises(ProtocolError): validate_plan_manifest([])
+
+    def test_status_reports_the_switch(self):
+        self.assertFalse(self.svc.status()["share_plan_with_phones"])
+
+
 class TestFixtures(unittest.TestCase):
     FX = os.path.join(os.path.dirname(__file__), "..", "fixtures", "v1")
 
     def test_manifest_matches_files(self):
         with open(os.path.join(self.FX, "MANIFEST.sha256")) as fh: lines = fh.read().split("\n")
         listed = {l.split("  ")[1]: l.split("  ")[0] for l in lines if l.strip()}
-        files = {f for f in os.listdir(self.FX) if f.endswith(".json")} | {"invalid/" + f for f in os.listdir(os.path.join(self.FX, "invalid"))}
+        files = ({f for f in os.listdir(self.FX) if f.endswith(".json")} | {"invalid/" + f for f in os.listdir(os.path.join(self.FX, "invalid"))}
+                 | {"plan_ignored/" + f for f in os.listdir(os.path.join(self.FX, "plan_ignored"))})
         self.assertEqual(set(listed), files)
         for f, h in listed.items():
             with open(os.path.join(self.FX, f), "rb") as fh: self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), h, f)
@@ -481,6 +585,21 @@ class TestFixtures(unittest.TestCase):
             e = json.load(open(os.path.join(self.FX, f)))
             validate_envelope(e)
             if e["type"] in WORKER_TYPES: validate_worker_payload(e["type"], e["payload"])
+            if "plan" in e["payload"]: validate_plan_manifest(e["payload"]["plan"])
+
+    def test_plan_ignored_fixtures_are_valid_assignments_with_unusable_plans(self):
+        from victorfleet.protocol import validate_envelope
+        d = os.path.join(self.FX, "plan_ignored")
+        names = sorted(os.listdir(d)); self.assertGreaterEqual(len(names), 8)
+        for f in names:
+            e = json.load(open(os.path.join(d, f)))
+            validate_envelope(e)                                               # the assignment itself is fine and must still run
+            with self.assertRaises(ProtocolError, msg=f): validate_plan_manifest(e["payload"]["plan"])
+
+    def test_plan_fixture_matches_what_the_coordinator_builds(self):
+        e = json.load(open(os.path.join(self.FX, "assignment_with_plan.json")))
+        mine = [j for j in e["payload"]["plan"]["jobs"] if j["job_id"] == e["payload"]["job_id"]]
+        self.assertEqual(len(mine), 1); self.assertEqual(mine[0]["args"], e["payload"]["args"])
 
     def test_invalid_fixtures_rejected_with_expected_code(self):
         from victorfleet.protocol import validate_envelope, validate_worker_payload, WORKER_TYPES
