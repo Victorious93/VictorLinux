@@ -3,7 +3,7 @@
 Work by Victorious. Status words below are literal: **Implemented**, **Built**, **JVM/host-tested**, **Emulator-tested**, **Physically verified**. Nothing here has been run on a physical phone.
 
 ## Choose a microphone
-`victor-mic list | status | use default | use pc <stable-id> | use phone <DEVICE> --provider droidcommand|keyboard | prefer-phone on --device D --provider P | virtual on [--set-default]`.
+`victor-mic serve --offer NAME:ID:PROVIDER[:TTL][:read]` adds the phone read-aloud opt-in. `victor-mic list | status | use default | use pc <stable-id> | use phone <DEVICE> --provider droidcommand|keyboard | prefer-phone on --device D --provider P | virtual on [--set-default]`.
 Settings live in `~/.config/victorlinux/mic.json` (0600) and are keyed by stable device identity and provider. A manual PC or phone choice is **never** replaced silently by a hot-plugged headset; only the explicit "use my preferred phone when no PC mic is available" fallback can substitute, and only with live, unexpired consent. A stored preference can never start capture: consent exists only in memory on the PC and expires (default 1 h, max 8 h) or on reboot.
 
 ## Pair a phone as a microphone
@@ -30,6 +30,7 @@ Stop/revoke: Stop on the phone, or end `serve`; expiry also ends it.
 | Dispatcher `victordispatch` (voice and manual share one gate; fixed adb key argv per named serial) | yes | n/a | yes | – | – |
 | Microphone… button in the Phone GUI | written, syntax-checked only | – | no (no Tk) | – | – |
 | Push-to-talk pipeline `victorptt` (focus bound at press, echo guard, cancel on disconnect, 15 s cap) + `serve --ptt` | yes | n/a | yes with a fake recogniser; Vosk backend **not run** (no model) | – | – |
+| Read PC screen aloud from the phone: `:read` opt-in on the offer, PC replies over the same session; Kotlin client + DroidCommand button speaking via local TTS | yes | DroidCommand compiles | Python and Kotlin round-trip against the real receiver; AT-SPI and phone TTS **not run** | – | – |
 | (still missing:) single-window embedded tiles, PTT button/shortcut + speech model, rustdeskV phone-to-phone, read-aloud on the phone | **not implemented** | – | – | – | – |
 
 See the handoff message for the shortest remaining checks.

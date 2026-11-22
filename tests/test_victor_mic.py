@@ -396,3 +396,15 @@ def test_missing_model_gives_install_help(tmp_path):
     with pytest.raises(vp.RecognizerMissing) as e: vp.VoskRecognizer(str(tmp_path / "none"))
     assert "import" in str(e.value).lower() or "model" in str(e.value).lower()
     assert vp.pc_capture_argv("src")[0] == "parec"
+
+
+def test_read_request_needs_its_own_optin_and_works_without_audio():
+    def run(allow):
+        reg = vm.SessionRegistry("pc1", Clock()); ses = reg.offer("a", "N", "droidcommand", allow_read=allow)
+        rx = vm.MicReceiver(reg, read_handler=lambda: {"ok": True, "text": "hello", "pc": "pc1", "window": "W", "reason": ""})
+        srv, cli = _pair(); th = threading.Thread(target=rx.serve, args=(srv,)); th.start()
+        vm.client_hello(cli, ses); cli.sendall(vm.pack_frame(vm.T_READ_REQ, b""))
+        t, body = vm.read_frame(cli); cli.sendall(vm.pack_frame(vm.T_BYE, b"")); th.join(5); cli.close()
+        return t, json.loads(body)
+    t, r = run(False); assert t == vm.T_READ_RESP and r == {"ok": False, "reason": "not-enabled"}
+    t, r = run(True); assert r["ok"] and r["text"] == "hello" and r["window"] == "W"

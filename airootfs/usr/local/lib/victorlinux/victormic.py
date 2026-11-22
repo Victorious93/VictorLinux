@@ -175,6 +175,7 @@ class PhoneSession:
     sharing: str = "idle"              # idle | sharing | muted | silenced | stopped
     last_frame_at: float = 0.0
     revoked: bool = False
+    allow_read: bool = False           # separate opt-in: phone may ask this PC to read its screen text aloud
 
     def consent_valid(self, now: float) -> bool:
         return not self.revoked and now < self.expires_at
@@ -193,7 +194,7 @@ class SessionRegistry:
         self._s: dict[str, PhoneSession] = {}
         self._lock = threading.Lock()
 
-    def offer(self, device_id: str, nickname: str, provider: str, ttl_s: float = 3600) -> PhoneSession:
+    def offer(self, device_id: str, nickname: str, provider: str, ttl_s: float = 3600, allow_read: bool = False) -> PhoneSession:
         if provider not in PROVIDERS:
             raise ValueError("unknown provider")
         ttl = max(30.0, min(float(ttl_s), SESSION_MAX_TTL_S))
@@ -205,7 +206,7 @@ class SessionRegistry:
                     old.revoked = True
                     old.sharing = "stopped"
             s = PhoneSession(secrets.token_hex(12), device_id, nickname, provider, self.pc_id,
-                             secrets.token_bytes(32), self.clock() + ttl)
+                             secrets.token_bytes(32), self.clock() + ttl, allow_read=allow_read)
             self._s[s.session_id] = s
             return s
 
@@ -304,7 +305,7 @@ class Resolution:
 def _phone_state(s: PhoneSession | None, now: float) -> str:
     if s is None or not s.consent_valid(now):
         return "needs-consent"
-    if not s.live:
+    if not s.live or s.sharing == "idle":      # a read-only connection is not a microphone
         return "disconnected"
     if s.sharing == "muted":
         return "muted"
@@ -364,7 +365,7 @@ def resolve(settings: dict[str, Any], pc: list[PcSource], default_name: str, reg
 
 # ---------------------------------------------------------------------------------------------- wire protocol
 
-T_CHALLENGE, T_HELLO, T_HELLO_OK, T_AUDIO, T_CTRL, T_BYE = 0, 1, 2, 3, 4, 5
+T_CHALLENGE, T_HELLO, T_HELLO_OK, T_AUDIO, T_CTRL, T_BYE, T_READ_REQ, T_READ_RESP = 0, 1, 2, 3, 4, 5, 6, 7
 
 
 def pack_frame(ftype: int, payload: bytes) -> bytes:
@@ -439,7 +440,9 @@ class MicReceiver:
 
     def __init__(self, reg: SessionRegistry, sinks: Iterable[Callable[[PhoneSession, bytes], None]] = (),
                  on_event: Callable[[str, PhoneSession | None], None] | None = None,
-                 on_utterance_cancel: Callable[[PhoneSession], None] | None = None):
+                 on_utterance_cancel: Callable[[PhoneSession], None] | None = None,
+                 read_handler: Callable[[], dict] | None = None):
+        self.read_handler = read_handler
         self.reg = reg
         self.sinks = list(sinks)
         self.on_event = on_event or (lambda *_: None)
@@ -470,7 +473,7 @@ class MicReceiver:
                 self.on_event("rejected", None)
                 return None
             ses = cand
-            ses.live, ses.sharing, ses.last_frame_at = True, "sharing", self.reg.clock()
+            ses.live, ses.sharing, ses.last_frame_at = True, "idle", self.reg.clock()   # becomes "sharing" on the first audio frame
             self.buffers[ses.session_id] = LiveBuffer()
             conn.sendall(pack_frame(T_HELLO_OK, b"{}"))
             self.on_event("connected", ses)
@@ -497,6 +500,8 @@ class MicReceiver:
                     continue
                 last_seq = seq
                 ses.last_frame_at = now
+                if ses.sharing == "idle":
+                    ses.sharing = "sharing"
                 pcm = body[4:]
                 if ses.sharing != "sharing" or self.pc_muted:
                     continue
@@ -513,6 +518,13 @@ class MicReceiver:
                         self.buffers[ses.session_id].clear()
                         self.on_utterance_cancel(ses)
                 self.on_event("state:" + str(st), ses)
+            elif t == T_READ_REQ:
+                # Reading is its own opt-in, independent of microphone sharing, and uses the same authenticated session.
+                if not ses.allow_read or self.read_handler is None:
+                    resp = {"ok": False, "reason": "not-enabled"}
+                else:
+                    resp = self.read_handler()
+                conn.sendall(pack_frame(T_READ_RESP, json.dumps(resp).encode("utf-8")))
             elif t == T_BYE:
                 return
 
@@ -677,7 +689,7 @@ def serve(args: argparse.Namespace) -> int:
         sinks.append(wav)
     for spec in args.offer or []:
         nick, dev, prov, *rest = spec.split(":")
-        ses = reg.offer(dev, nick, prov, float(rest[0]) if rest else 3600)
+        ses = reg.offer(dev, nick, prov, float(rest[0]) if rest and rest[0] != "read" else 3600, allow_read="read" in rest)
         print(make_offer(ses, host, args.port, spki), flush=True)
     if args.virtual_mic:
         vmic = VirtualMic()
@@ -699,8 +711,21 @@ def serve(args: argparse.Namespace) -> int:
                     res = ptt.release()
                     print(json.dumps({"result": type(res).__name__, **vars(res)}), flush=True)
         threading.Thread(target=stdin_loop, daemon=True).start()
+    def do_read() -> dict:
+        import pcread
+        if args.read_test_text:
+            be: Any = type("B", (), {"active_window": lambda self: pcread.Window("w", "test", "Test window"),
+                                     "runs": lambda self, w: [pcread.TextRun(args.read_test_text, "text", "w", True, False, time.time())]})()
+        else:
+            try:
+                be = pcread.AtspiBackend()
+            except Exception:
+                be = None
+        r = pcread.read_selection(be, args.pc_id, True)
+        return {"ok": r.ok, "text": r.text, "pc": r.pc, "window": r.window, "reason": r.reason}
+
     rx = MicReceiver(reg, sinks, lambda e, s: print(f"event {e} {s.label() if s else ''}", file=sys.stderr, flush=True),
-                     (lambda s: ptt.cancel()) if ptt else None)
+                     (lambda s: ptt.cancel()) if ptt else None, do_read)
     ctx = tls.server_context(crt, key)
     ls = socket.socket()
     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -763,11 +788,12 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=47821)
     sv.add_argument("--pc-id", default=socket.gethostname().replace(" ", "-")[:48] or "pc")
     sv.add_argument("--tls-dir")
-    sv.add_argument("--offer", action="append", metavar="NICK:DEVICE:PROVIDER[:TTL_S]")
+    sv.add_argument("--offer", action="append", metavar="NICK:DEVICE:PROVIDER[:TTL_S][:read]")
     sv.add_argument("--virtual-mic", action="store_true")
     sv.add_argument("--set-default", action="store_true")
     sv.add_argument("--record", metavar="FILE.wav", help="write received audio to a WAV file (acceptance testing)")
     sv.add_argument("--ptt", action="store_true", help="offline push-to-talk on the phone audio: stdin 'p' down, 'r' up")
+    sv.add_argument("--read-test-text", help=argparse.SUPPRESS)
     sv.add_argument("--seconds", type=float, default=0, help="stop after N seconds (0 = until Ctrl-C)")
     a = ap.parse_args(argv)
     if a.cmd == "serve":
