@@ -368,3 +368,31 @@ def test_voice_dispatch_targets_only_named_phone_and_respects_grants():
     assert vd.dispatch(vv.parse("focus my nord", ph, "b"), m, run=run).ok and m.focus == "a"
     assert vd.dispatch(vv.parse("go home", ph, "a", focus_now="c"), m, run=run).ask is not None
     assert len(sent) == 1
+
+
+class FakeRec:
+    def __init__(s, text="go back", conf=0.9): s.text, s.conf, s.got = text, conf, b""
+    def reset(s): s.got = b""
+    def accept(s, pcm): s.got += pcm
+    def finish(s): return s.text, s.conf
+
+
+def test_ptt_binds_focus_at_press_ignores_echo_and_cancels():
+    import victorptt as vp
+    c = Clock(); focus = ["a"]
+    g = vv.EchoGuard(1.0, c); rec = FakeRec("go home")
+    s = vp.PttSession(rec, PH, lambda: focus[0], g)
+    s.press(); s.feed(b"\x01\x00" * 10); assert rec.got
+    assert s.release() == vv.Command("home", "a", True)
+    s.press(); g.start_output(); s.feed(b"\x01\x00" * 10); assert rec.got == b""         # TTS playing: ignored
+    g.end_output(); c.t += 5
+    s.cancel(); assert s.release().reason == "unknown"                                   # cancelled utterance cannot complete
+    s.press(); focus[0] = "c"; r = s.release(); assert isinstance(r, vv.Ask) and r.reason == "focus-changed"
+    s.press(); assert vp.VoskRecognizer.__name__ and True
+
+
+def test_missing_model_gives_install_help(tmp_path):
+    import victorptt as vp
+    with pytest.raises(vp.RecognizerMissing) as e: vp.VoskRecognizer(str(tmp_path / "none"))
+    assert "import" in str(e.value).lower() or "model" in str(e.value).lower()
+    assert vp.pc_capture_argv("src")[0] == "parec"

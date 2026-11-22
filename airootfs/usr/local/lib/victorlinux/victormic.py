@@ -684,7 +684,23 @@ def serve(args: argparse.Namespace) -> int:
         first = next(iter(reg.active()), None)
         vmic.start(first.label() if first else "Phone microphone", set_default=args.set_default)
         sinks.append(lambda ses, pcm: vmic.write(pcm))
-    rx = MicReceiver(reg, sinks, lambda e, s: print(f"event {e} {s.label() if s else ''}", file=sys.stderr, flush=True))
+    ptt = None
+    if args.ptt:
+        import victorptt, victorvoice
+        phones = [victorvoice.Phone(x.device_id, x.nickname, i + 1) for i, x in enumerate(reg.active())]
+        ptt = victorptt.PttSession(victorptt.VoskRecognizer(), phones, lambda: phones[0].device_id if phones else "")
+        sinks.append(lambda ses, pcm: ptt.feed(pcm))
+
+        def stdin_loop() -> None:   # "p" = button down, "r" = button up (prints the parsed command; nothing is executed here)
+            for line in sys.stdin:
+                if line.strip() == "p":
+                    ptt.press()
+                elif line.strip() == "r":
+                    res = ptt.release()
+                    print(json.dumps({"result": type(res).__name__, **vars(res)}), flush=True)
+        threading.Thread(target=stdin_loop, daemon=True).start()
+    rx = MicReceiver(reg, sinks, lambda e, s: print(f"event {e} {s.label() if s else ''}", file=sys.stderr, flush=True),
+                     (lambda s: ptt.cancel()) if ptt else None)
     ctx = tls.server_context(crt, key)
     ls = socket.socket()
     ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -751,6 +767,7 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--virtual-mic", action="store_true")
     sv.add_argument("--set-default", action="store_true")
     sv.add_argument("--record", metavar="FILE.wav", help="write received audio to a WAV file (acceptance testing)")
+    sv.add_argument("--ptt", action="store_true", help="offline push-to-talk on the phone audio: stdin 'p' down, 'r' up")
     sv.add_argument("--seconds", type=float, default=0, help="stop after N seconds (0 = until Ctrl-C)")
     a = ap.parse_args(argv)
     if a.cmd == "serve":

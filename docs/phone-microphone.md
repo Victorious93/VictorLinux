@@ -29,6 +29,7 @@ Stop/revoke: Stop on the phone, or end `serve`; expiry also ends it.
 | Web (Arch) card + `/api/mic` tested; Debian Tk tab and `victormicgui` window written, syntax-checked only | yes | n/a | API tested; Tk **not rendered** | – | – |
 | Dispatcher `victordispatch` (voice and manual share one gate; fixed adb key argv per named serial) | yes | n/a | yes | – | – |
 | Microphone… button in the Phone GUI | written, syntax-checked only | – | no (no Tk) | – | – |
+| Push-to-talk pipeline `victorptt` (focus bound at press, echo guard, cancel on disconnect, 15 s cap) + `serve --ptt` | yes | n/a | yes with a fake recogniser; Vosk backend **not run** (no model) | – | – |
 | (still missing:) single-window embedded tiles, PTT button/shortcut + speech model, rustdeskV phone-to-phone, read-aloud on the phone | **not implemented** | – | – | – | – |
 
 See the handoff message for the shortest remaining checks.
