@@ -73,3 +73,42 @@ jobs:
             out/debian/build-*.log
           retention-days: 14
           if-no-files-found: error
+
+  boot-test:
+    # Boots the ISO that the `iso` job just built, under QEMU, and fails on a real defect. This is a VM boot,
+    # NOT a real-hardware boot: it does not cover Secure Boot, physical drives, GPUs or the owner's firmware.
+    needs: iso
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: victorlinux-debian-${{ inputs.profile || 'amd' }}
+          path: out/debian
+      - name: Verify the downloaded ISO against its checksum
+        run: cd out/debian && sha256sum -c *.sha256
+      - name: Install QEMU and tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 ovmf xorriso e2fsprogs imagemagick
+      - name: Enable KVM when the runner offers it
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || echo "no /dev/kvm: QEMU will use TCG (slow)"
+      - name: Boot smoke test (kernel/initrd from the ISO, offline)
+        run: sudo python3 -I debian-edition/tests/vm_test.py smoke "$(ls out/debian/*.iso | head -1)" out/boot-test
+      - name: Bootloader test (BIOS and UEFI, real bootloader from the ISO)
+        run: sudo python3 -I debian-edition/tests/vm_test.py bootloader "$(ls out/debian/*.iso | head -1)" out/boot-test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot-test-${{ inputs.profile || 'amd' }}
+          path: |
+            out/boot-test/*.png
+            out/boot-test/*.json
+            out/boot-test/vm/*.log
+            out/boot-test/vm/*.err
+          retention-days: 14
+          if-no-files-found: warn

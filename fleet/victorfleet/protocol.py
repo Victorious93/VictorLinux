@@ -6,7 +6,7 @@ the DroidCommand worker's JVM tests load byte-identical copies (guarded by fixtu
 Compatibility rules: unknown *optional* fields are ignored; unknown message types and a different
 protocol major are rejected with a structured error. Minor bumps only add optional fields.
 """
-import re, time, uuid
+import json, re, time, uuid
 
 PROTOCOL_MAJOR = 1
 PROTOCOL_MINOR = 1                      # 1.1 adds terminal_*, draft_* messages and capability `status`; 1.0 peers stay valid
@@ -14,6 +14,8 @@ MAX_MESSAGE_BYTES = 256 * 1024          # one envelope on the wire
 MAX_BATCH = 64                          # messages per exchange
 MAX_STRING = 4096
 MAX_ARGS_BYTES = 64 * 1024              # job args
+MAX_PLAN_JOBS = 25                      # jobs in the optional plan manifest on an assignment
+MAX_PLAN_BYTES = 96 * 1024              # the whole manifest, serialised
 ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
 OP_RE = re.compile(r"^[a-z][a-z0-9_.]{0,63}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -152,6 +154,37 @@ def validate_worker_payload(t, p):
         validate_terminal_status(p)
     elif t == "draft_status":
         validate_draft_status(p)
+
+
+def validate_plan_manifest(plan):
+    """The optional `plan` object an assignment may carry (see docs/FLEET.md, "Plan manifest"). Raises ProtocolError.
+
+    A phone must IGNORE a manifest it cannot validate and run the job as usual; the manifest only lets the owner approve
+    a reviewed batch once, it is never needed to run anything."""
+    if not isinstance(plan, dict):
+        raise ProtocolError("bad_request", "plan must be an object")
+    plan_id = _id(plan, "plan_id")
+    jobs = _need(plan, "jobs", list)
+    if not 1 <= len(jobs) <= MAX_PLAN_JOBS:
+        raise ProtocolError("too_large" if len(jobs) > MAX_PLAN_JOBS else "bad_request", f"plan must list 1..{MAX_PLAN_JOBS} jobs")
+    seen = set()
+    for j in jobs:
+        if not isinstance(j, dict):
+            raise ProtocolError("bad_request", "plan job must be an object")
+        jid = _id(j, "job_id")
+        if not jid.startswith(plan_id + "."):
+            raise ProtocolError("bad_request", "plan lists a job that is not part of this plan")
+        if jid in seen:
+            raise ProtocolError("bad_request", "plan lists the same job twice")
+        seen.add(jid)
+        if not OP_RE.match(_str(j, "op", 64)):
+            raise ProtocolError("bad_request", "plan job op invalid")
+        if len(json.dumps(_need(j, "args", dict))) > MAX_ARGS_BYTES:
+            raise ProtocolError("too_large", "plan job args too large")
+        if "requires_root" in j:
+            _need(j, "requires_root", bool)
+    if len(json.dumps(plan)) > MAX_PLAN_BYTES:
+        raise ProtocolError("too_large", "plan manifest too large")
 
 
 def validate_artifact_ref(a):

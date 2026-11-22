@@ -5,8 +5,8 @@ claim: delivery is at-least-once, results are fenced by (job_id, attempt), and u
 parked in `needs_review` instead of being replayed.
 """
 import json, time
-from .protocol import (ProtocolError, TERMINAL, OP_RE, ID_RE, MAX_ARGS_BYTES, envelope, validate_capabilities,
-                       now_ms, new_id, TERMINAL_OPS)
+from .protocol import (ProtocolError, TERMINAL, OP_RE, ID_RE, MAX_ARGS_BYTES, MAX_PLAN_JOBS, MAX_PLAN_BYTES, envelope,
+                       validate_capabilities, now_ms, new_id, TERMINAL_OPS)
 
 DEFAULTS = {
     "lease_s": 90,                 # assignment lease; refreshed by progress/heartbeat from the owning attempt
@@ -18,6 +18,8 @@ DEFAULTS = {
     "battery_floor": 15,           # never start work below this unless charging
     "blocked_thermal": ("severe", "critical", "emergency", "shutdown"),
     "plan_approval": True,         # owner must approve a plan before first dispatch (configurable)
+    "share_plan_with_phones": False,  # OFF by default: send each assignment the plan's job list so a phone's owner can approve
+                                      # a reviewed batch once. Phones still decide on their own; see docs/FLEET.md "Plan manifest".
     "default_concurrency": 1,
     "max_concurrency": 4,
 }
@@ -334,11 +336,15 @@ class Coordinator:
                 continue
             n = j["attempts"] + 1
             lease = t + self.cfg["lease_s"] * 1000
-            msg = envelope("assignment", "coordinator", best["id"], {
+            payload = {
                 "job_id": j["id"], "attempt": n, "fence": n, "op": j["op"], "args": json.loads(j["args_json"]),
                 "inputs": refs, "lease_expires_ms": lease, "deadline_ms": j["deadline_ms"],
                 "requires_root": bool(j["requires_root"]), "ui_exclusive": bool(j["ui_exclusive"]),
-                "idempotent": bool(j["idempotent"])})
+                "idempotent": bool(j["idempotent"])}
+            plan = self._plan_manifest(j["plan_id"])
+            if plan is not None:
+                payload["plan"] = plan
+            msg = envelope("assignment", "coordinator", best["id"], payload)
             with self.s.tx() as db:
                 cur = db.execute("UPDATE jobs SET state='assigned', attempts=?, updated_ms=? WHERE id=? AND state='queued'", (n, t, j["id"]))
                 if cur.rowcount != 1:
@@ -389,6 +395,21 @@ class Coordinator:
             out[key] = {"state": st, "detail": o.get("detail") or o.get("reason") or ("ready" if st == "ready" else st.replace("_", " ")),
                         "action": None if st == "ready" else actions.get(st, "see the detail")}
         return out
+
+    def _plan_manifest(self, plan_id):
+        """The optional `plan` object for an assignment, or None. Only when the owner switched `share_plan_with_phones` on,
+        the plan has 2..MAX_PLAN_JOBS phone jobs (a single job gains nothing from a batch) and the whole thing fits.
+        Jobs the coordinator runs itself are not listed: they never reach a phone. The same args are sent here as in each
+        assignment, because a phone binds its owner's approval to exactly the args it was shown."""
+        if not self.cfg["share_plan_with_phones"]:
+            return None
+        rows = [r for r in self.s.q("SELECT id, op, args_json, requires_root, coordinator_local FROM jobs WHERE plan_id=? ORDER BY priority, id",
+                                    (plan_id,)) if not r["coordinator_local"]]
+        if not 2 <= len(rows) <= MAX_PLAN_JOBS:
+            return None
+        plan = {"plan_id": plan_id, "jobs": [{"job_id": r["id"], "op": r["op"], "args": json.loads(r["args_json"]),
+                                              "requires_root": bool(r["requires_root"])} for r in rows]}
+        return plan if len(json.dumps(plan)) <= MAX_PLAN_BYTES else None
 
     # ---------------------------------------------------------------- outbox
     def enqueue(self, device_id, msg, db=None):

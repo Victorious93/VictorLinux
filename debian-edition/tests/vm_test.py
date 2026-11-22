@@ -6,7 +6,8 @@ The ISO is booted via -kernel/-initrd taken from the ISO itself, with TEST-ONLY 
 Bootloader (BIOS/UEFI) boots are checked separately by `bootloader` mode (screenshots).
 
   vm_test.py full ISO MODEL.gguf OUTDIR      # lifecycle/persistence/offline suite
-  vm_test.py bootloader ISO OUTDIR           # BIOS + UEFI boot-menu screenshots
+  vm_test.py smoke ISO OUTDIR                # model-free boot + security-defaults checks (what CI runs)
+  vm_test.py bootloader ISO OUTDIR           # BIOS + UEFI boot-menu screenshots; fails on a blank screen
 
 Requires: qemu-system-x86_64, xorriso, OVMF (for UEFI), root (loop-mount disposable data disks).
 """
@@ -20,6 +21,27 @@ def rec(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + (f"  [{str(detail)[:160]}]" if (detail and not ok) else ""), flush=True)
 
 
+def accel_args():
+    """KVM when /dev/kvm is usable (hosted CI runners), otherwise TCG (slow but works anywhere)."""
+    return ["-accel", "kvm"] if os.access("/dev/kvm", os.R_OK | os.W_OK) else ["-accel", "tcg"]
+
+
+def ppm_colors(path, limit=4096):
+    """Number of distinct pixel colours in a binary PPM (P6), capped at `limit`. 1 means a uniform (e.g. black) screen."""
+    with open(path, "rb") as f:
+        data = f.read()
+    m = re.match(rb"P6\s+(\d+)\s+(\d+)\s+(\d+)\s", data)
+    if not m:
+        return 0
+    px = data[m.end():]
+    seen = set()
+    for i in range(0, len(px) - 2, 3):
+        seen.add(px[i:i + 3])
+        if len(seen) >= limit:
+            break
+    return len(seen)
+
+
 class VM:
     def __init__(self, iso, workdir, name, disks=(), net_restrict=True, hostfwd=(), mem=4096, kernel=None, kappend="", vnc=True):
         self.w, self.name, self.iso = workdir, name, iso
@@ -31,7 +53,7 @@ class VM:
         ap = ("boot=live components noroot username=victor hostname=victorlinux locales=en_US.UTF-8 keyboard-layouts=us "
               "timezone=UTC nopersistence console=ttyS0 systemd.debug_shell=/dev/ttyS1 " + kappend)
         fwd = "".join(f",hostfwd=tcp::{h}-:{g}" for h, g in hostfwd)
-        cmd = ["qemu-system-x86_64", "-machine", "q35", "-cpu", "max", "-smp", "4", "-m", str(mem), "-display", "none", "-vga", "std",
+        cmd = ["qemu-system-x86_64", *accel_args(), "-machine", "q35", "-cpu", "max", "-smp", "4", "-m", str(mem), "-display", "none", "-vga", "std",
                "-kernel", k, "-initrd", i, "-append", ap, "-drive", f"file={iso},media=cdrom,readonly=on,if=ide",
                "-netdev", f"user,id=n0{',restrict=on' if net_restrict else ''}{fwd}", "-device", "virtio-net-pci,netdev=n0",
                "-serial", f"file:{self.console}", "-serial", f"unix:{self.sock},server=on,wait=off",
@@ -92,6 +114,7 @@ class VM:
 
     def screenshot(self, path):
         ppm = path + ".ppm"; self.qmp_cmd("screendump", filename=ppm); time.sleep(1)
+        self.last_colors = ppm_colors(ppm) if os.path.exists(ppm) else 0
         if os.path.exists(ppm):
             if shutil.which("convert"): subprocess.run(["convert", ppm, path])
             else: shutil.move(ppm, path)
@@ -253,7 +276,7 @@ def bootloader(iso, out):
             rec("UEFI boot menu", False, "OVMF not installed"); continue
         sock = f"{w}/{mode}.qmp"
         if os.path.exists(sock): os.unlink(sock)
-        cmd = ["qemu-system-x86_64", "-machine", "q35", "-cpu", "max", "-smp", "2", "-m", "2048", "-display", "none", "-vga", "std",
+        cmd = ["qemu-system-x86_64", *accel_args(), "-machine", "q35", "-cpu", "max", "-smp", "2", "-m", "2048", "-display", "none", "-vga", "std",
                "-cdrom", iso, "-boot", "d", "-qmp", f"unix:{sock},server=on,wait=off", "-serial", f"file:{w}/{mode}.serial"]
         if mode == "uefi": cmd += ["-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}"]
         p = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
@@ -261,12 +284,49 @@ def bootloader(iso, out):
         v = VM.__new__(VM); v.qmp = sock
         png = f"{out}/bootmenu-{mode}.png"; v.screenshot(png); time.sleep(20); v.screenshot(f"{out}/bootmenu-{mode}-later.png")
         p.kill(); p.wait()
-        rec(f"{mode.upper()} boot: bootloader screen captured (inspect PNG)", os.path.exists(png) and os.path.getsize(png) > 2000, png)
+        # A blank/black screen has 1 colour; a boot menu with text has many. The threshold is a heuristic, not a measured value.
+        rec(f"{mode.upper()} boot: bootloader drew a non-blank screen ({getattr(v, 'last_colors', 0)} colours; inspect the PNG)",
+            os.path.exists(png) and os.path.getsize(png) > 2000 and getattr(v, "last_colors", 0) >= 4, png)
     json.dump(RESULTS, open(f"{out}/bootloader-report.json", "w"), indent=1)
+    return 0 if all(r["ok"] for r in RESULTS) else 1
+
+
+def smoke(iso, out):
+    """Model-free subset of `full` boot 1: boots the real ISO's kernel/initrd offline and checks security defaults."""
+    os.makedirs(out, exist_ok=True); w = f"{out}/vm"; os.makedirs(w, exist_ok=True)
+    kern = extract_kernel(iso, f"{w}/k")
+    disk = f"{w}/data.img"; make_data_disk(disk, 1024)
+    vm = VM(iso, w, "smoke", disks=[(disk, False)], net_restrict=True, kernel=kern)
+    try:
+        t = vm.connect(); rec("boot to a root debug shell", True, f"{t:.0f}s")
+        rc, o = vm.sh(". /etc/os-release; echo $PRETTY_NAME"); rec("Debian release", "Debian" in o, o)
+        rc, o = vm.sh("systemctl is-system-running --wait 2>&1 | tail -1", 240)
+        state = o.strip().splitlines()[-1] if o.strip() else ""
+        rec("system reaches running state", state == "running", o)
+        rc, o = vm.sh("systemctl --failed --no-legend | cut -c1-80"); rec("no failed units", o.strip() == "", o)
+        rc, o = vm.sh("passwd -S victor; test ! -e /etc/sudoers.d/live && echo no-live-sudoers; grep -rc 'NOPASSWD: ALL' /etc/sudoers /etc/sudoers.d | grep -v ':0' || echo no-nopasswd-all")
+        rec("owner locked, no shared password, no NOPASSWD:ALL", " L " in o and "no-live-sudoers" in o and "no-nopasswd-all" in o, o)
+        rc, o = vm.sh("ss -ltnH | awk '{print $4}'")
+        rec("nothing listening on a non-loopback address at boot", not re.search(r"(0\.0\.0\.0|\*|\[::\]):\d+", o), o)
+        rc, o = vm.sh("pgrep -a llama-server || echo no-llama-running"); rec("no AI service started at boot", "no-llama-running" in o, o)
+        rc, o = vm.sh("cat /run/victor/storage.json"); rec("storage auto-mounted VICTORDATA", '"state": "mounted-rw"' in o, o[:300])
+        rc, o = vm.sh("ss -tnp | grep -v 127.0.0 | grep ESTAB || echo no-external-connections"); rec("no established external connections", "no-external-connections" in o, o)
+        vm.screenshot(f"{out}/smoke-boot.png")
+    except Exception as e:
+        rec("smoke run completed", False, e)
+    finally:
+        vm.poweroff()
+    json.dump(RESULTS, open(f"{out}/smoke-report.json", "w"), indent=1)
+    print(f"RESULT pass={sum(r['ok'] for r in RESULTS)} fail={sum(not r['ok'] for r in RESULTS)}")
+    return 0 if RESULTS and all(r["ok"] for r in RESULTS) else 1
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "full":
         sys.exit(full(sys.argv[2], sys.argv[3], sys.argv[4]))
+    elif sys.argv[1] == "smoke":
+        sys.exit(smoke(sys.argv[2], sys.argv[3]))
     elif sys.argv[1] == "bootloader":
-        bootloader(sys.argv[2], sys.argv[3])
+        sys.exit(bootloader(sys.argv[2], sys.argv[3]))
+    else:
+        sys.exit(__doc__)

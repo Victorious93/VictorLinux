@@ -55,6 +55,8 @@ def loopdisk(tmp_path):
 def image_with_sha(tmp_path, kind="mbr", size=100 << 20, name="x.iso"):
     iso = tmp_path / name
     tlp.make_iso(str(iso), size=size, kind=kind)
+    with open(iso, "r+b") as f:   # make_iso leaves an all-zero payload: stamp a name-unique one so two images never compare equal
+        f.seek(1 << 20); f.write(hashlib.sha256(name.encode()).digest() * 4096)
     (tmp_path / (name + ".sha256")).write_text(hashlib.sha256(iso.read_bytes()).hexdigest() + "  " + name + "\n")
     return str(iso)
 
