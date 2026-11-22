@@ -23,6 +23,9 @@ Stop/revoke: Stop on the phone, or end `serve`; expiry also ends it.
 | Detect PC / read-aloud policy (privacy filters) | yes | n/a | yes with a fake accessibility backend | – | – |
 | AT-SPI backend | yes | n/a | **no** (no desktop session here) | – | – |
 | DroidCommand / Keyboard Android shells | yes | see handoff | – | – | – |
-| Settings → Audio → Microphone GUI in both Control Centers, 3-tile live GUI, PTT button/shortcut, rustdeskV phone-to-phone | **not implemented** | – | – | – | – |
+| `victor-pc detect` / `victor-pc read --enable [--speak]` | yes | n/a | CLI gating tested; AT-SPI read **not run** | – | – |
+| scrcpy tile placement (`scrcpy_tile_argvs`): one window per phone via --serial, view-only unless granted | yes | n/a | argv tested only | – | – |
+| Tk mic settings window `victormicgui.py` | written, py_compile only (no Tk here) | – | no | – | – |
+| Settings → Audio entry inside the two Control Centers, shortcut in phone dashboard, single-window embedded tiles, PTT button/shortcut + speech model, rustdeskV phone-to-phone, read-aloud on the phone | **not implemented** | – | – | – | – |
 
 See the handoff message for the shortest remaining checks.

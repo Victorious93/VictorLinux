@@ -127,3 +127,21 @@ def map_point(px: float, py: float, rect: tuple[int, int, int, int], dev_w: int,
     if not (ox <= px < ox + cw and oy <= py < oy + ch):
         return None                    # click in the letterbox bars: ignored
     return int((px - ox) / scale), int((py - oy) / scale)
+
+
+def scrcpy_tile_argvs(mgr: TileManager, width: int, height: int, origin: tuple[int, int] = (0, 0),
+                      view_only: bool = True) -> dict[str, list[str]]:
+    """One scrcpy command per tile, placed with scrcpy's own --window-x/-y/-width/-height so the phones appear
+    side by side as one dashboard. Each device is addressed by --serial, so input to one window can only reach that
+    phone; tiles are view-only (--no-control) unless the owner granted control. scrcpy windows are separate OS windows
+    laid out by this model, not widgets inside one Tk window (embedding is not implemented)."""
+    from victorphone import scrcpy_argv
+    out: dict[str, list[str]] = {}
+    for dev, (x, y, w, h) in mgr.layout(width, height).items():
+        t = mgr.get(dev)
+        extra = [f"--window-x={origin[0] + x}", f"--window-y={origin[1] + y}", f"--window-width={w}", f"--window-height={h}",
+                 "--window-borderless"]
+        if view_only or t.permissions != "control":
+            extra.append("--no-control")
+        out[dev] = scrcpy_argv(window_title=f"{t.nickname} · VictorLinux", serial=dev, no_audio=True, extra=extra)
+    return out

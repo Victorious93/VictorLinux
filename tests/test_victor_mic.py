@@ -317,3 +317,26 @@ def test_handover_between_apps_on_one_handset_releases_previous_owner():
     assert reg.find("h", "droidcommand") is None and reg.find("h", "keyboard") is b
     other = reg.offer("h2", "Pixel", "keyboard")
     assert b.consent_valid(reg.clock()) and other.consent_valid(reg.clock())     # different handsets unaffected
+
+
+def test_scrcpy_tiles_are_placed_per_serial_and_view_only_by_default():
+    m = vs.TileManager()
+    for d in "abc": m.add(d, d.upper())
+    m.get("b").permissions = "control"
+    argv = vs.scrcpy_tile_argvs(m, 1800, 900)
+    assert set(argv) == {"a", "b", "c"}
+    for d, a in argv.items():
+        assert f"--serial={d}" in a and any(x.startswith("--window-x=") for x in a)
+    assert "--no-control" in argv["a"] and "--no-control" in argv["b"]       # view_only default
+    assert "--no-control" not in vs.scrcpy_tile_argvs(m, 1800, 900, view_only=False)["b"]
+    assert "--no-control" in vs.scrcpy_tile_argvs(m, 1800, 900, view_only=False)["a"]   # not granted
+
+
+def test_victor_pc_cli_detect_and_read_gating(tmp_path):
+    import subprocess, sys
+    root = os.path.join(os.path.dirname(__file__), "..")
+    exe = os.path.join(root, "airootfs/usr/local/bin/victor-pc")
+    d = subprocess.run([sys.executable, exe, "detect"], capture_output=True, text=True, timeout=30)
+    assert d.returncode == 0 and "display_session" in json.loads(d.stdout)
+    r = subprocess.run([sys.executable, exe, "read"], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 2 and "turned off" in r.stdout

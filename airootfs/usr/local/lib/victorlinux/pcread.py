@@ -10,6 +10,7 @@ independent of microphone sharing. Text is returned to the caller; it is not log
 from __future__ import annotations
 
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
@@ -173,3 +174,60 @@ class AtspiBackend:
                     if c:
                         stack.append(c)
         return out
+
+
+def _facts() -> dict[str, Any]:
+    cpu = ""
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+        ram = int([l for l in open("/proc/meminfo") if l.startswith("MemTotal")][0].split()[1]) * 1024
+    except (OSError, IndexError, ValueError):
+        ram = 0
+    gpus: list[str] = []
+    try:
+        import subprocess
+        r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5)
+        gpus = [l.split(": ", 1)[1] for l in r.stdout.splitlines() if "VGA" in l or "3D controller" in l]
+    except (OSError, ValueError, IndexError):
+        pass
+    return {"cpu_name": cpu, "gpu_names": gpus, "ram_total": ram}
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse, json, socket
+    ap = argparse.ArgumentParser(prog="victor-pc", description="Detect this PC / read its screen text (opt-in).")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("detect")
+    r = sub.add_parser("read", help="read the selected text, or the active window, aloud/to stdout")
+    r.add_argument("--enable", action="store_true", help="required: reading is opt-in per invocation")
+    r.add_argument("--speak", action="store_true", help="speak on the PC output (espeak-ng/spd-say if present)")
+    a = ap.parse_args(argv)
+    name = socket.gethostname()
+    if a.cmd == "detect":
+        import victormic
+        mics, default = victormic.list_pc_sources()
+        active = next((m.label for m in mics if m.name == default), "")
+        print(json.dumps(detect(_facts(), name, mics, active), indent=2))
+        return 0
+    try:
+        backend: Backend | None = AtspiBackend()
+    except Exception:
+        backend = None
+    res = read_selection(backend, name, a.enable)
+    msg = announce(res)
+    print(msg)
+    if res.ok and a.speak:
+        import shutil, subprocess
+        tts = shutil.which("espeak-ng") or shutil.which("spd-say")
+        if tts:
+            subprocess.run([tts, msg], timeout=300)
+        else:
+            print("No text-to-speech engine installed (espeak-ng or speech-dispatcher).", file=sys.stderr)
+    return 0 if res.ok else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
