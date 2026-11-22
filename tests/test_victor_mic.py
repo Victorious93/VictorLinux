@@ -351,3 +351,20 @@ def test_status_snapshot_roundtrip_has_no_secret_and_goes_stale(tmp_path):
     assert vm.resolve(sel, [], "", r2).state == "ok"
     c.t += 30                                                   # serve stopped writing: phone must not look live
     assert vm.resolve(sel, [], "", vm.read_status_registry("pc", p, clock=c)).state == "needs-consent"
+
+
+def test_voice_dispatch_targets_only_named_phone_and_respects_grants():
+    import victordispatch as vd
+    m = vs.TileManager()
+    for d in "abc": m.add(d, {"a": "Nord", "b": "Pixel", "c": "Moto"}[d]); m.get(d).permissions = "control"; m.set_state(d, "live")
+    sent = []
+    run = lambda argv: (sent.append(argv), subprocess.CompletedProcess(argv, 0))[1]
+    ph = [vv.Phone("a", "Nord", 1), vv.Phone("b", "Pixel", 2), vv.Phone("c", "Moto", 3)]
+    cmd = vv.parse("go back on phone two", ph, "a")
+    assert not vd.dispatch(cmd, m, run=run).ok and not sent                     # input not held: refused like a click
+    m.grant_input("b")
+    assert vd.dispatch(cmd, m, run=run).ok
+    assert sent == [["adb", "-s", "b", "shell", "input", "keyevent", "4"]]       # only Pixel; fixed argv, no shell text
+    assert vd.dispatch(vv.parse("focus my nord", ph, "b"), m, run=run).ok and m.focus == "a"
+    assert vd.dispatch(vv.parse("go home", ph, "a", focus_now="c"), m, run=run).ask is not None
+    assert len(sent) == 1

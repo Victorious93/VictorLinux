@@ -631,6 +631,14 @@ def main_gui(argv: list[str] | None = None) -> int:
             self.after(100, self.refresh_devices)
             self.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        def open_mic(self) -> None:
+            # Shortcut to Settings -> Audio -> Microphone (same settings as `victor-mic`). Unverified: no display here.
+            try:
+                import victormicgui
+                victormicgui.open_window(self)
+            except Exception as exc:  # never break the mirroring window over a settings dialog
+                self.set_status(f"Microphone settings unavailable: {exc}") if hasattr(self, "set_status") else None
+
         def _build(self) -> None:
             header = ttk.Frame(self, padding=(22, 16, 22, 6))
             header.pack(fill="x")
@@ -650,6 +658,7 @@ def main_gui(argv: list[str] | None = None) -> int:
             row.pack(fill="x")
             ttk.Label(row, text="Devices").pack(side="left")
             ttk.Button(row, text="Refresh", command=self.refresh_devices).pack(side="right")
+            ttk.Button(row, text="Microphone…", command=self.open_mic).pack(side="right", padx=(0, 6))
 
             self.listbox = tk.Listbox(body, height=6, exportselection=False, activestyle="none")
             self.listbox.pack(fill="x", pady=(6, 12))
