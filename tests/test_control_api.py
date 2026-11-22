@@ -172,3 +172,14 @@ def test_input_and_bluetooth_are_off_by_default(control):
     assert status == 200, data
     assert body["default"] == "off"
     assert body["pairing"]["active"] is False
+
+
+def test_mic_api_selects_and_rejects(control, tmp_path):
+    port, headers = control
+    status, data = request(port, "GET", "/api/mic", headers=headers)
+    body = json.loads(data)
+    assert status == 200 and body["settings"]["mode"] in ("default", "pc", "phone") and "state" in body
+    status, data = request(port, "POST", "/api/mic", {"action": "bogus"}, headers=headers)
+    assert status == 400
+    status, data = request(port, "POST", "/api/mic", {"action": "phone", "device_id": "x", "provider": "evil"}, headers=headers)
+    assert status == 400

@@ -26,6 +26,7 @@ Stop/revoke: Stop on the phone, or end `serve`; expiry also ends it.
 | `victor-pc detect` / `victor-pc read --enable [--speak]` | yes | n/a | CLI gating tested; AT-SPI read **not run** | – | – |
 | scrcpy tile placement (`scrcpy_tile_argvs`): one window per phone via --serial, view-only unless granted | yes | n/a | argv tested only | – | – |
 | Tk mic settings window `victormicgui.py` | written, py_compile only (no Tk here) | – | no | – | – |
-| Settings → Audio entry inside the two Control Centers, shortcut in phone dashboard, single-window embedded tiles, PTT button/shortcut + speech model, rustdeskV phone-to-phone, read-aloud on the phone | **not implemented** | – | – | – | – |
+| Web (Arch) card + `/api/mic` tested; Debian Tk tab and `victormicgui` window written, syntax-checked only | yes | n/a | API tested; Tk **not rendered** | – | – |
+| Shortcut in phone dashboard, single-window embedded tiles, PTT button/shortcut + speech model, rustdeskV phone-to-phone, read-aloud on the phone | **not implemented** | – | – | – | – |
 
 See the handoff message for the shortest remaining checks.

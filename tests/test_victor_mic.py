@@ -340,3 +340,14 @@ def test_victor_pc_cli_detect_and_read_gating(tmp_path):
     assert d.returncode == 0 and "display_session" in json.loads(d.stdout)
     r = subprocess.run([sys.executable, exe, "read"], capture_output=True, text=True, timeout=30)
     assert r.returncode == 2 and "turned off" in r.stdout
+
+
+def test_status_snapshot_roundtrip_has_no_secret_and_goes_stale(tmp_path):
+    c = Clock(); reg = vm.SessionRegistry("pc", c); s = live(reg, "a", "keyboard")
+    p = str(tmp_path / "st.json"); vm.write_status(reg, p)
+    assert s.secret.hex() not in open(p).read() and oct(os.stat(p).st_mode & 0o777) == "0o600"
+    r2 = vm.read_status_registry("pc", p, clock=c)
+    sel = vm.normalize({"mode": "phone", "phone": {"device_id": "a", "provider": "keyboard"}})
+    assert vm.resolve(sel, [], "", r2).state == "ok"
+    c.t += 30                                                   # serve stopped writing: phone must not look live
+    assert vm.resolve(sel, [], "", vm.read_status_registry("pc", p, clock=c)).state == "needs-consent"

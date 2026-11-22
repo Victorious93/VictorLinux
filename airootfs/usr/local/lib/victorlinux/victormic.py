@@ -250,6 +250,44 @@ class SessionRegistry:
         return dropped
 
 
+def status_path() -> str:
+    return os.path.join(os.path.dirname(settings_path()), "mic-sessions.json")
+
+
+def write_status(reg: SessionRegistry, path: str | None = None) -> None:
+    """Secret-free snapshot so the GUI/Control Center can show phone sources owned by `victor-mic serve`."""
+    path = path or status_path()
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    rows = [{"session_id": x.session_id, "device_id": x.device_id, "nickname": x.nickname, "provider": x.provider,
+             "pc_id": x.pc_id, "expires_at": x.expires_at, "live": x.live, "sharing": x.sharing,
+             "last_frame_at": x.last_frame_at} for x in reg.active()]
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump({"written_at": reg.clock(), "sessions": rows}, fh)
+    os.replace(tmp, path)
+
+
+def read_status_registry(pc_id: str = "local", path: str | None = None, max_age_s: float = 5.0,
+                         clock: Callable[[], float] = time.time) -> SessionRegistry:
+    """Rebuild a read-only registry from the snapshot. A stale or missing snapshot (serve not running) yields no
+    phones, so a remembered preference cannot appear live."""
+    reg = SessionRegistry(pc_id, clock)
+    try:
+        with open(path or status_path(), encoding="utf-8") as fh:
+            d = json.load(fh)
+        if clock() - float(d["written_at"]) > max_age_s:
+            return reg
+        for r in d["sessions"]:
+            if r.get("provider") in PROVIDERS:
+                ses = PhoneSession(str(r["session_id"]), str(r["device_id"]), str(r["nickname"]), r["provider"], str(r["pc_id"]),
+                                   b"", float(r["expires_at"]), bool(r["live"]), str(r["sharing"]), float(r["last_frame_at"]))
+                reg._s[ses.session_id] = ses
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return reg
+
+
 # ---------------------------------------------------------------------------------------------- resolution
 
 @dataclass
@@ -659,6 +697,7 @@ def serve(args: argparse.Namespace) -> int:
                 conn, _ = ls.accept()
             except socket.timeout:
                 reg.sweep()
+                write_status(reg)
                 continue
             conn.settimeout(IDLE_TIMEOUT_S)
             try:

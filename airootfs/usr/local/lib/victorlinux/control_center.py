@@ -955,6 +955,37 @@ class App:
             return 200, {"ok": True, "revoked": n, "message": "Device revoked. It can no longer send input."}
         return 400, {"error": "unknown input action"}
 
+    def mic_status(self):
+        import victormic
+        pc, default = victormic.list_pc_sources()
+        st = victormic.load_settings()
+        reg = victormic.read_status_registry()
+        r = victormic.resolve(st, pc, default, reg)
+        return {"settings": st, "inputs": [vars(x) for x in pc],
+                "phones": [{"label": x.label(), "device_id": x.device_id, "provider": x.provider, "live": x.live} for x in reg.active()],
+                "selected": r.selected, "delivering": r.delivering or None, "state": r.state, "recovery": r.recovery}
+
+    def mic_action(self, b):
+        import victormic
+        st = victormic.load_settings()
+        act = b.get("action")
+        if act == "default":
+            st["mode"] = "default"
+        elif act == "pc" and b.get("stable_id"):
+            st.update(mode="pc", pc_stable_id=str(b["stable_id"]))
+        elif act == "phone" and b.get("device_id") and b.get("provider") in victormic.PROVIDERS:
+            st.update(mode="phone", phone={"device_id": str(b["device_id"]), "provider": b["provider"]})
+        elif act == "fallback":
+            st["fallback_to_preferred_phone"] = bool(b.get("on"))
+            if b.get("on") and b.get("device_id") and b.get("provider") in victormic.PROVIDERS:
+                st["preferred_phone"] = {"device_id": str(b["device_id"]), "provider": b["provider"]}
+        elif act == "mute":
+            st["muted"] = bool(b.get("on"))
+        else:
+            return 400, {"error": "unknown microphone action"}
+        victormic.save_settings(st)
+        return 200, self.mic_status()
+
     def bluetooth_status(self):
         st = {"default": "off", "pairing": {"active": False}, "devices": [],
               "message": "Bluetooth stays off by default. It is only started when you press Pair phone (Bluetooth)."}
@@ -1142,6 +1173,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, APP.keys_status())
             if u.path == "/api/input":
                 return self._send(200, APP.input_status())
+            if u.path == "/api/mic":
+                return self._send(200, APP.mic_status())
             if u.path == "/api/bluetooth":
                 return self._send(200, APP.bluetooth_status())
 
@@ -1298,6 +1331,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200 if r.returncode == 0 else 500, {"ok": r.returncode == 0, "message": r.stdout.strip() or r.stderr.strip()})
             if p == "/api/input":
                 code, payload = APP.input_action(b)
+                return self._send(code, payload)
+            if p == "/api/mic":
+                code, payload = APP.mic_action(b)
                 return self._send(code, payload)
             if p == "/api/bluetooth":
                 code, payload = APP.bluetooth_action(b)

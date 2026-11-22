@@ -9,7 +9,6 @@ def open_window(parent=None, registry: "vm.SessionRegistry | None" = None) -> No
     import tkinter as tk
     from tkinter import ttk
 
-    reg = registry or vm.SessionRegistry("local")
     win = tk.Toplevel(parent) if parent else tk.Tk()
     win.title("Microphone")
     s = vm.load_settings()
@@ -23,6 +22,7 @@ def open_window(parent=None, registry: "vm.SessionRegistry | None" = None) -> No
         choices["Follow system default"] = {"mode": "default"}
         for p in pc:
             choices[f"{p.label} ({p.kind})"] = {"mode": "pc", "pc_stable_id": p.stable_id}
+        reg = vm.read_status_registry()
         for ses in reg.active():
             choices[ses.label()] = {"mode": "phone", "phone": {"device_id": ses.device_id, "provider": ses.provider}}
         box["values"] = list(choices)
