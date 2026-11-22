@@ -12,6 +12,10 @@ Branch `claude/new-session-tkkgkz` in each repo. Status words are used strictly:
 | Terminal hand-off + host enforcement | rustdeskV | proto, `terminal_policy.rs`, host check in `connection.rs`, client declaration, Kotlin transport service, Dart hand-off | **no** (no Flutter/Rust full build here) | `terminal_policy.rs` 5 tests via `rustc --test` only |
 | Unified inbox, email, outbox, drafts review, MMS download | VictorSMS | yes | `:app:assembleDebug` OK (3 ABI APKs) | `mail-core` 19 tests (GreenMail IMAPS/SMTPS + fake SMTP server), app unit tests (drafts, MMS parser) |
 
+## Update (later the same day)
+* DroidCommand: `BrokerOnlyRunner` (tested) refuses every shell/root/termux/shizuku-capable tool for REMOTE-initiated requests; `app/fleet/LiveBridges.kt` (VictorSuite AIDL broker client, VictorSMS Messenger draft client) compiles with `-PincludeAndroid=true` but is **not run on a device** and `FleetWorker` is still **not constructed in `:app`** (it never was).
+* Own SIP/VoIP: `voip/` server (6 real-Asterisk TLS tests), VictorSMS SIP provisioning + Telecom service; editions `standard` (Apache-2.0 + Twilio) and `voip` (GPLv3 + Linphone, uncompiled here). See `voip/README.md`, VictorSMS `docs/EDITIONS.md`.
+
 ## Not done / blockers (exact)
 1. **rustdeskV Android *host* terminal service** (VictorLinux/desktop → phone via rustdesk) is NOT implemented; the host fails closed (`connection.rs` passes `victorsuite_ready=false`). The required VictorLinux→phone flow uses the coordinator + DroidCommand worker + VictorSuite instead (implemented on the JVM side only). Remaining: Rust JNI glue to `IShellBroker`.
 2. **DroidCommand `:app` wiring**: construct `FleetWorker` with `LiveFeatures`, an AIDL `ShellBrokerClient` (copy `IShellBroker*.aidl`), a Messenger `DraftHandoffClient` (ops `message.draft.deliver|status`, group `DRAFT`), and the capability probe (`LiveCapabilities`). **Bypass closure is therefore not done**: DroidCommand's own `core-shell`, `core-termux` (RUN_COMMAND, adb), `core-root`, `core-shizuku` paths still exist for local use and a remote-origin routing guard is not implemented.
