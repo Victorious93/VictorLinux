@@ -56,6 +56,11 @@ class TestServer(unittest.TestCase):
             try: socket.create_connection(("127.0.0.1", PORT), timeout=1).close(); break
             except OSError: time.sleep(0.5)
         else: raise RuntimeError("asterisk did not come up")
+        for _ in range(60):                                      # the TLS port opens before the endpoints are loaded: wait for them
+            out = subprocess.run(["asterisk", "-C", os.path.join(cls.d, "etc/asterisk.conf"), "-rx", "pjsip list endpoints"], capture_output=True, text=True).stdout
+            if "Objects found: 2" in out: break
+            time.sleep(0.5)
+        else: raise RuntimeError("endpoints did not load")
 
     @classmethod
     def tearDownClass(cls):
@@ -67,7 +72,12 @@ class TestServer(unittest.TestCase):
         self.assertNotEqual(a["password"], b["password"]); self.assertEqual(len(a["password"]), 24); self.assertNotEqual(a["username"], b["username"])
 
     def test_authenticated_registration_succeeds_and_wrong_password_fails(self):
-        ok = Sip(PORT).register(self.creds["alice"]["username"], self.creds["alice"]["password"]); self.assertTrue(ok.startswith("SIP/2.0 200"), ok)
+        ok = ""
+        for _ in range(4):                                       # first request after start-up is occasionally dropped by Asterisk: retry on a fresh connection
+            try: ok = Sip(PORT).register(self.creds["alice"]["username"], self.creds["alice"]["password"])
+            except (TimeoutError, OSError): time.sleep(1); continue
+            break
+        self.assertTrue(ok.startswith("SIP/2.0 200"), ok)
         try: bad = Sip(PORT).register(self.creds["alice"]["username"], "wrong-password")
         except (TimeoutError, OSError): bad = "SIP/2.0 403 (no reply: dropped)"      # a silent drop is also a refusal
         self.assertFalse(bad.startswith("SIP/2.0 200"), bad)
