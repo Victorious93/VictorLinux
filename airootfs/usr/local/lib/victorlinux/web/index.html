@@ -185,6 +185,12 @@ footer{color:var(--mut);font-size:11px;text-align:center;padding:14px 24px 28px;
   <div class="row"><div><label for="pHost">Address the phone should use</label><input id="pHost" placeholder="LAN or VPN IP / hostname" style="width:220px"></div><button class="b" id="bPair">Pair phone</button><button class="b s" id="bPairStop" hidden>Close pairing</button></div>
   <div id="pQr"></div></div>
 
+ <div class="card" id="micCard"><h2>Settings · Audio · Microphone</h2>
+  <p class="mut">Pick the microphone VictorLinux listens to. It is independent of which phone you control. A phone appears here only after its owner starts sharing (see <code>victor-mic serve</code> and docs/phone-microphone.md).</p>
+  <div id="micState" class="mut"></div>
+  <div class="row"><select id="micSel" aria-label="Microphone"></select><button class="b" id="bMicUse">Use this microphone</button></div>
+  <div class="row"><label><input type="checkbox" id="micMute"> Mute</label></div>
+  <div id="micHelp" class="mut"></div></div>
  <div class="card" id="btCard"><h2>Pair phone (Bluetooth)</h2>
   <p class="mut">Lets the <b>Victorious Keyboard</b> app act as a standard Bluetooth keyboard and mouse. Bluetooth stays off by default. This makes the PC discoverable for 120 seconds, shows the passkey, and trusts the phone only after you confirm. It does not enable Bluetooth on boot.</p>
   <div id="btState" class="mut">Off by default.</div>
@@ -457,6 +463,21 @@ async function loadInput(){
   if(!(j.pairing&&j.pairing.active))$("inQr").innerHTML="";
   $("inTable").innerHTML=(j.devices||[]).length?"<tr><th>Device</th><th></th></tr>"+(j.devices||[]).map(d=>`<tr><td>${esc(d.name)} <span class="mut">${esc(d.id)}</span></td><td><button class="b d" data-inrev="${esc(d.id)}">Revoke</button></td></tr>`).join(""):`<tr><td class="mut">No paired keyboards.</td></tr>`;
 }
+async function loadMic(){
+  const j=await api("/api/mic"); if(j.error){$("micState").textContent=j.error;return}
+  const opts=[["default","","Follow system default"]];
+  (j.inputs||[]).forEach(i=>opts.push(["pc",i.stable_id,i.label+" ("+i.kind+")"]));
+  (j.phones||[]).forEach(p=>opts.push(["phone",p.device_id+"|"+p.provider,p.label]));
+  $("micSel").innerHTML=opts.map(o=>`<option value="${esc(o[0]+"|"+o[1])}">${esc(o[2])}</option>`).join("");
+  $("micState").textContent="Selected: "+j.selected+" · Delivering: "+(j.delivering||"nothing")+" · "+j.state;
+  $("micHelp").textContent=(j.recovery||[]).join(" ");
+  $("micMute").checked=!!(j.settings&&j.settings.muted);
+}
+$("bMicUse").onclick=async()=>{const [k,a,b]=$("micSel").value.split("|");
+  const body=k==="pc"?{action:"pc",stable_id:a}:k==="phone"?{action:"phone",device_id:a,provider:b}:{action:"default"};
+  const j=await api("/api/mic",body); if(j.error)toast(j.error,"bad"); else toast("Microphone saved"); loadMic()};
+$("micMute").onchange=async()=>{await api("/api/mic",{action:"mute",on:$("micMute").checked}); loadMic()};
+setInterval(()=>{if(!document.hidden)loadMic()},3000); loadMic();
 async function loadBt(){
   const j=await api("/api/bluetooth");
   if(j.error){$("btState").innerHTML=`<span class="mut">${esc(j.error||"Bluetooth helper is not available here.")}</span>`;$("btTable").innerHTML="";return}
