@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets as pysecrets
+import shlex
 import shutil
 import signal
 import socketserver
@@ -164,6 +165,55 @@ class App:
             return json.loads(r.stdout)
         except ValueError:
             return {"message": r.stdout.strip()}
+
+    FLEET_DRAFT_FIELDS = {"to", "cc", "bcc"}
+
+    def fleet_terminal(self, b):
+        """Open an interactive phone terminal in a local terminal window. Always `victor-fleet terminal ID`: the phone's owner still approves."""
+        dev = b.get("device")
+        if not (isinstance(dev, str) and self.FLEET_ID.match(dev)):
+            return 400, {"error": "a valid device id is required"}
+        emu = next((e for e in ("xfce4-terminal", "x-terminal-emulator", "xterm", "foot", "alacritty") if shutil.which(e)), None)
+        cmdline = [os.environ.get("VICTOR_FLEET_BIN", "/usr/local/bin/victor-fleet"), "terminal", dev]
+        if b.get("privileged") is True:
+            cmdline.append("--privileged")
+        if not emu:
+            return 200, {"message": "No terminal emulator found; run in a terminal:  " + " ".join(cmdline)}
+        try:
+            subprocess.Popen([emu, "-e", " ".join(shlex.quote(x) for x in cmdline)] if emu == "xfce4-terminal" else [emu, "-e", *cmdline],
+                             env=dict(os.environ, PYTHONPATH=os.environ.get("VICTOR_FLEET_LIB", "/usr/local/lib/victorfleet")), start_new_session=True)
+        except OSError as e:
+            return 400, {"error": f"could not open a terminal window: {e}"}
+        return 200, {"message": "Terminal opened. Approve the request on the phone."}
+
+    def fleet_draft(self, b):
+        """Hand an SMS/email draft to VictorSMS on a phone. The phone's owner reviews it and alone decides to send. Fields are mapped
+        to CLI arguments one by one (no shell); mail credentials never exist here."""
+        dev, ch = b.get("device"), b.get("channel")
+        if not (isinstance(dev, str) and self.FLEET_ID.match(dev)) or ch not in ("sms", "email"):
+            return 400, {"error": "device and channel (sms|email) are required"}
+        args = ["message", "draft-" + ch, dev]
+        for key in ("to", "cc", "bcc"):
+            vals = b.get(key) or []
+            if not isinstance(vals, list) or any(not isinstance(v, str) or not v or len(v) > 320 or v.startswith("-") for v in vals):
+                return 400, {"error": f"'{key}' must be a list of addresses"}
+            if key != "to" and ch == "sms" and vals:
+                return 400, {"error": "SMS has no cc/bcc"}
+            for v in vals:
+                args += ["--" + key, v]
+        if not b.get("to"):
+            return 400, {"error": "at least one recipient is required"}
+        body = b.get("body")
+        if not isinstance(body, str) or len(body) > 100_000:
+            return 400, {"error": "body must be text"}
+        args += ["--body", body]
+        if ch == "email":
+            subj = b.get("subject", "")
+            if not isinstance(subj, str) or "\n" in subj or "\r" in subj or len(subj) > 998:
+                return 400, {"error": "subject must be a single line"}
+            args += ["--subject", subj]
+        r = self.fleet(args, timeout=60)
+        return (400 if isinstance(r, dict) and r.get("error") else 200), r
 
     def fleet_action(self, b):
         cmd, arg = b.get("cmd"), b.get("arg")
@@ -1270,6 +1320,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(*APP.library_action(b))
             if p == "/api/fleet/action":
                 return self._send(*APP.fleet_action(b))
+            if p == "/api/fleet/terminal":
+                return self._send(*APP.fleet_terminal(b))
+            if p == "/api/fleet/draft":
+                return self._send(*APP.fleet_draft(b))
+            if p == "/api/fleet/drafts":
+                return self._send(200, APP.fleet(["message", "list"]))
             if p == "/api/llm/start":
                 return self._send(200, APP.start_llm(tc.load_settings()))
             if p == "/api/llm/stop":

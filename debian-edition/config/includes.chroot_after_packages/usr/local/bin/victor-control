@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """VictorLinux Control Center (Tk). Thin GUI: every action is a `victor-ctl` call, so everything is scriptable."""
-import json, math, os, subprocess, sys, threading, tkinter as tk
+import json, math, os, shlex, subprocess, sys, threading, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
 CTL = "/usr/local/bin/victor-ctl"
@@ -472,9 +472,13 @@ class App(tk.Tk):
         b = ttk.Frame(f); b.pack(fill="x", pady=4)
         for t, fn in (("Refresh", self.fleet_refresh), ("Start", lambda: self.fleet_do("start")), ("Stop", lambda: self.fleet_do("stop")),
                       ("Pair phone...", self.fleet_pair), ("Pause", lambda: self.fleet_dev("pause")), ("Resume", lambda: self.fleet_dev("resume")),
-                      ("Disable", lambda: self.fleet_dev("disable")), ("Enable", lambda: self.fleet_dev("enable")), ("Revoke", self.fleet_revoke)):
+                      ("Disable", lambda: self.fleet_dev("disable")), ("Enable", lambda: self.fleet_dev("enable")), ("Revoke", self.fleet_revoke),
+                      ("Terminal...", self.fleet_terminal), ("Draft message...", self.fleet_draft)):
             ttk.Button(b, text=t, command=fn).pack(side="left", padx=2)
         self.fl_devs = tk.Listbox(f, height=5, exportselection=False); self.fl_devs.pack(fill="x", pady=2); self._themed.append(self.fl_devs)
+        self.fl_feat = ttk.Label(f, wraplength=840, justify="left", text="Select a phone to see terminal and messaging availability."); self.fl_feat.pack(anchor="w")
+        self.fl_devs.bind("<<ListboxSelect>>", lambda e: self.fleet_show_features())
+        self._fl_features = {}
         b2 = ttk.Frame(f); b2.pack(fill="x", pady=4)
         for t, fn in (("Submit plan file...", self.fleet_submit), ("Batch-hash folder...", self.fleet_batch), ("Review", lambda: self.fleet_plan("review")),
                       ("Approve", lambda: self.fleet_plan("approve")), ("Cancel", lambda: self.fleet_plan("cancel")), ("Report", lambda: self.fleet_plan("report"))):
@@ -496,6 +500,7 @@ class App(tk.Tk):
                         f"{'connected' if d['connected'] else 'offline'}  bat={ds.get('battery_percent','?')}% thermal={ds.get('thermal','?')}  "
                         f"root={'yes' if d.get('capabilities', {}).get('root', {}).get('granted') else 'no'}  jobs={len(d['active_jobs'])}")
                 self.fl_devs.insert("end", line); self._fl_dev_ids.append(d["id"])
+                self._fl_features[d["id"]] = d.get("features", {})
             self.fl_plans.delete(0, "end"); self._fl_plan_ids = []
             for p_ in plans:
                 self.fl_plans.insert("end", f"{p_['id']}  {p_['state']}  {p_['title']}"); self._fl_plan_ids.append(p_["id"])
@@ -503,6 +508,63 @@ class App(tk.Tk):
             self.out(self.fl_out, json.dumps({k: st.get(k) for k in ("running", "bind", "network_enabled", "fingerprint_sha256", "job_counts")}, indent=2) +
                      ("\n" + note if note else "") + ("" if st.get("running") else "\nCoordinator is stopped (press Start)."))
         self.bg(get, done)
+
+    FLEET_FEATURES = (("terminal", "Terminal"), ("shell_oneshot", "One-shot command"), ("messaging_sms", "SMS drafts"), ("messaging_email", "Email drafts"))
+
+    def fleet_feature_text(self, dev_id):
+        f = self._fl_features.get(dev_id, {})
+        lines = []
+        for k, n in self.FLEET_FEATURES:
+            x = f.get(k, {"state": "unknown"})
+            lines.append(f"{n}: {x['state'].replace('_', ' ')}" + ("" if x["state"] == "ready" else f"  ->  {x.get('action') or x.get('detail') or ''}"))
+        return "\n".join(lines)
+
+    def fleet_show_features(self):
+        i = self.fl_devs.curselection()
+        if i: self.fl_feat.config(text=self.fleet_feature_text(self._fl_dev_ids[i[0]]))
+
+    def fleet_terminal(self):
+        d = self._fl_sel(self.fl_devs, self._fl_dev_ids)
+        if not d: return
+        st = self._fl_features.get(d, {}).get("terminal", {})
+        if st.get("state") != "ready":
+            messagebox.showinfo("Terminal not available", f"{st.get('state', 'unknown').replace('_', ' ')}: {st.get('action') or st.get('detail') or ''}"); return
+        cmd = ["/usr/local/bin/victor-fleet", "terminal", d]
+        try:
+            subprocess.Popen(["xfce4-terminal", "-e", " ".join(shlex.quote(x) for x in cmd)], start_new_session=True)
+            self.out(self.fl_out, "Terminal opened in a new window. The phone's owner must approve it in VictorSuite; nothing runs until they do.")
+        except OSError as e:
+            self.out(self.fl_out, f"Could not open a terminal window ({e}). Run in a terminal:  {' '.join(cmd)}")
+
+    def fleet_draft(self):
+        d = self._fl_sel(self.fl_devs, self._fl_dev_ids)
+        if not d: return
+        f = self._fl_features.get(d, {})
+        win = tk.Toplevel(self); win.title("Draft for the phone's owner to review"); win.transient(self)
+        ttk.Label(win, wraplength=560, text="This hands a draft to VictorSMS on the phone. The phone shows the recipients, the sending identity and the contents; only the "
+                  "owner's Send button there submits it. Declining sends nothing. Mail passwords stay on the phone.").grid(row=0, column=0, columnspan=2, padx=8, pady=6)
+        ch = tk.StringVar(value="sms" if f.get("messaging_sms", {}).get("state") == "ready" else "email")
+        ttk.Label(win, text="Channel").grid(row=1, column=0, sticky="e")
+        ttk.Combobox(win, textvariable=ch, values=["sms", "email"], state="readonly", width=8).grid(row=1, column=1, sticky="w")
+        ent = {}
+        for r, (k, n) in enumerate((("to", "To (comma separated)"), ("cc", "Cc"), ("bcc", "Bcc"), ("subject", "Subject")), start=2):
+            ttk.Label(win, text=n).grid(row=r, column=0, sticky="e"); ent[k] = ttk.Entry(win, width=60); ent[k].grid(row=r, column=1, padx=6, pady=2)
+        body = tk.Text(win, width=60, height=8); body.grid(row=6, column=0, columnspan=2, padx=8, pady=4)
+        def send():
+            c = ch.get()
+            if f.get("messaging_" + c, {}).get("state") != "ready":
+                x = f.get("messaging_" + c, {}); messagebox.showinfo("Not available", f"{x.get('state', 'unknown').replace('_', ' ')}: {x.get('action') or ''}", parent=win); return
+            lst = lambda s: [a.strip() for a in s.split(",") if a.strip()]
+            args = ["message", "draft-" + c, d, "--body", body.get("1.0", "end-1c")]
+            for a in lst(ent["to"].get()): args += ["--to", a]
+            if c == "email":
+                for a in lst(ent["cc"].get()): args += ["--cc", a]
+                for a in lst(ent["bcc"].get()): args += ["--bcc", a]
+                args += ["--subject", ent["subject"].get().replace("\n", " ")]
+            if not lst(ent["to"].get()): messagebox.showinfo("Draft", "Add at least one recipient.", parent=win); return
+            self.bg(lambda: ctl("fleet", *args), lambda r: self.out(self.fl_out, "Draft handed to the phone for review. Nothing is sent until its owner taps Send.\n" + (r if isinstance(r, str) else json.dumps(r, indent=2))))
+            win.destroy()
+        ttk.Button(win, text="Hand to phone for review", command=send).grid(row=7, column=1, sticky="e", padx=8, pady=6)
 
     def fleet_do(self, cmd):
         self.bg(lambda: ctl("fleet", cmd), lambda r: (self.out(self.fl_out, r if isinstance(r, str) else json.dumps(r, indent=2)), self.after(600, self.fleet_refresh)))

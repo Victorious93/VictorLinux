@@ -155,7 +155,8 @@ class FleetService:
             devs.append({"id": d["id"], "name": d["name"], "state": d["state"], "enabled": bool(d["enabled"]), "paused": bool(d["paused"]),
                          "connected": self.coord.online(d) if d["state"] == "paired" else False, "last_seen_ms": d["last_seen_ms"],
                          "key_fingerprint": d["key_fpr"], "device_state": json.loads(d["device_state_json"] or "{}"),
-                         "capabilities": json.loads(d["caps_json"] or "{}"), "active_jobs": [a["job_id"] for a in act]})
+                         "capabilities": json.loads(d["caps_json"] or "{}"), "active_jobs": [a["job_id"] for a in act],
+                         "features": self.coord.features(d)})
         counts = {r["state"]: r["c"] for r in s.q("SELECT state, COUNT(*) c FROM jobs GROUP BY state")}
         return {"running": True, "bind": f"{self.bind}:{self.port}", "network_enabled": self.cfg["network_enabled"],
                 "fingerprint_sha256": self.fingerprint, "spki_sha256": self.spki, "persistence": self.persistence, "data_dir": self.dir,
@@ -229,6 +230,19 @@ class WorkerHandler(Base):
                 self._json(200, self.service.enroll(body))
             elif path == "/v1/exchange":
                 self._exchange(self._auth())
+            elif path.startswith("/v1/terminal/") and path.endswith("/exchange"):
+                dev = self._auth()
+                sid = path.split("/")[3]
+                body = json.loads(self._body(MAX_MESSAGE_BYTES) or b"{}")
+                wait = min(float(body.get("wait_s", 0) or 0), self.service.cfg["long_poll_max_s"])
+                end = time.time() + wait
+                while True:
+                    out = self.service.coord.terminals.phone_exchange(dev, sid, body)
+                    if out["chunks"] or time.time() >= end or out["state"] in ("denied", "closed", "failed", "revoked", "expired", "disconnected"):
+                        break
+                    body = dict(body, chunks=[])             # already consumed; only poll for more output from now on
+                    time.sleep(0.1)
+                self._json(200, out)
             elif path == "/v1/rotate":
                 d = self._auth(); self._json(200, {"credential": self.service.rotate(d)})
             else:
@@ -381,6 +395,27 @@ class AdminHandler(Base):
                 return {"ok": True}
             if act == "unpair":
                 c.revoke_device(did, "owner unpaired"); return {"ok": True}
+        T, Dh = c.terminals, c.drafts
+        if k == ("POST", "terminal") and len(parts) == 1:
+            return T.open(body["device"], body.get("desktop") or "victorlinux-local", body.get("mode", "interactive"), body.get("privilege", "user"),
+                          body.get("command"), int(body.get("cols", 80)), int(body.get("rows", 24)))
+        if k == ("GET", "terminal") and len(parts) == 1: return T.list()
+        if k == ("GET", "terminal") and len(parts) == 2: return T.info(parts[1])
+        if k == ("POST", "terminal") and len(parts) == 3 and parts[2] == "close": return T.close(parts[1], body.get("reason", "closed by the owner"))
+        if k == ("POST", "terminal") and len(parts) == 3 and parts[2] == "exchange":
+            wait = min(float(body.get("wait_s", 0) or 0), s.cfg["long_poll_max_s"])
+            end = time.time() + wait
+            while True:
+                out = T.desktop_exchange(parts[1], body.get("token"), body)
+                if out["chunks"] or time.time() >= end or out["state"] in ("denied", "closed", "failed", "revoked", "expired", "disconnected"):
+                    return out
+                body = dict(body, chunks=[])
+                time.sleep(0.1)
+        if k == ("POST", "drafts") and len(parts) == 1:
+            return Dh.create(body["device"], body["channel"], body["draft"], body.get("origin") or "victorlinux-local")
+        if k == ("GET", "drafts") and len(parts) == 1: return Dh.list()
+        if k == ("GET", "drafts") and len(parts) == 2: return Dh.get(parts[1])
+        if k == ("POST", "drafts") and len(parts) == 3 and parts[2] == "retry": return Dh.retry(parts[1])
         if k == ("GET", "events"):
             return [dict(r) for r in s.store.q("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(q.get("n", ["200"])[0]),))]
         if k == ("POST", "tick"): c.tick(); return {"ok": True}

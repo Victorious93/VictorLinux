@@ -579,12 +579,12 @@ class TestFixtures(unittest.TestCase):
             with open(os.path.join(self.FX, f), "rb") as fh: self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), h, f)
 
     def test_valid_fixtures_validate(self):
-        from victorfleet.protocol import validate_envelope, validate_worker_payload, WORKER_TYPES
+        from victorfleet.protocol import validate_envelope, validate_any_payload
         for f in sorted(os.listdir(self.FX)):
             if not f.endswith(".json"): continue
             e = json.load(open(os.path.join(self.FX, f)))
             validate_envelope(e)
-            if e["type"] in WORKER_TYPES: validate_worker_payload(e["type"], e["payload"])
+            if e["type"] != "enroll_response": validate_any_payload(e["type"], e["payload"])
             if "plan" in e["payload"]: validate_plan_manifest(e["payload"]["plan"])
 
     def test_plan_ignored_fixtures_are_valid_assignments_with_unusable_plans(self):
@@ -602,13 +602,13 @@ class TestFixtures(unittest.TestCase):
         self.assertEqual(len(mine), 1); self.assertEqual(mine[0]["args"], e["payload"]["args"])
 
     def test_invalid_fixtures_rejected_with_expected_code(self):
-        from victorfleet.protocol import validate_envelope, validate_worker_payload, WORKER_TYPES
+        from victorfleet.protocol import validate_envelope, validate_any_payload
         d = os.path.join(self.FX, "invalid")
         for f in sorted(os.listdir(d)):
             case = json.load(open(os.path.join(d, f)))
             with self.assertRaises(ProtocolError, msg=f) as cm:
                 validate_envelope(case["envelope"])
-                if case["envelope"]["type"] in WORKER_TYPES: validate_worker_payload(case["envelope"]["type"], case["envelope"]["payload"])
+                validate_any_payload(case["envelope"]["type"], case["envelope"]["payload"])
             self.assertEqual(cm.exception.code, case["expect_error"], f)
 
 
