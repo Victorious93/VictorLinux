@@ -15,7 +15,7 @@ No telemetry, no runtime downloads, no bundled models.
 | Raspberry Pi 5 (4/8/16 GB) | `pi-desktop`, `pi-headless` | AI box: llama.cpp CPU (NEON), gateway, GUI tools | **[Likely]** — never booted |
 | Raspberry Pi 4 / 400 (2 GB+) | `pi-desktop`, `pi-headless` | AI box (small models) | **[Likely]** — never booted |
 | Raspberry Pi 4 (1 GB) | `pi-headless` | Node (LLM disabled: under 1.8 GiB RAM) | **[Likely]** — never booted |
-| Raspberry Pi Zero 2 W (512 MB) | `pi-headless` only | **Node only**: gateway/CLI, Bluetooth/Wi-Fi bridge, mesh node later. LLM serving disabled | **[Likely]** — never booted |
+| Raspberry Pi Zero 2 W (512 MB) | `pi-headless` only | **Node only**: gateway/CLI, Bluetooth/Wi-Fi bridge, mesh node (`victor-mesh`). LLM serving disabled | **[Likely]** — never booted |
 | Pi 3 and older, Pi Zero / Zero W (32-bit) | — | Not supported (LLM disabled if it boots at all) | **[Guessing]** may boot the v8 kernel on Pi 3; untested |
 
 Why "node only" on the Zero 2 W: 512 MB RAM cannot hold even a 0.5B model plus the OS with useful context. At every boot
@@ -83,7 +83,7 @@ it is key-only (`victor-priv ssh-enable`).
 | `scrcpy` | **Reuses main** | `victor-phone` + the Debian edition's optional scrcpy hook (PR #9). scrcpy may be absent if trixie-backports lacks it for arm64 |
 | `phone-keyboard-bt` | **TODO** | Victorious Keyboard as a Bluetooth keyboard/mouse. No VictorLinux pairing tool on main yet and the phone side is not built. Manual today: `victor-pi bluetooth on`, then `bluetoothctl` |
 | `hotspot` | **TODO** | No hotspot tool on main yet; NetworkManager is in the image as the intended backend |
-| `mesh` | **TODO** | Victorious Mesh (tailscale + your Headscale). No mesh tool on main and tailscale is not in the image |
+| `mesh` | **Reuses main** | `victor-mesh` ([Victorious Mesh](victorious-mesh.md)): join your Headscale, advertises `tag:victorlinux-pi`. tailscale comes from the optional build hook; off by default. Works on the Zero 2 W as a headless mesh node |
 
 TODO hooks print `TODO(name)` and exit 3 without changing anything. When those tools land on main, the dispatcher
 (`pi-edition/overlay/usr/local/lib/victorlinux/pi/hooks/run-hook`) should call them instead of duplicating them.
