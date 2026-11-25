@@ -469,7 +469,7 @@ class MicReceiver:
                 self.on_event("rejected", None)
                 return None
             want = hello_mac(cand.secret, cand.pc_id, cand.device_id, cand.provider, cand.session_id, nonce)
-            if not hmac.compare_digest(want, str(h.get("mac", ""))):
+            if not hmac.compare_digest(want.encode(), str(h.get("mac", "")).encode()):
                 self.on_event("rejected", None)
                 return None
             ses = cand

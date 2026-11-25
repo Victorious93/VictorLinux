@@ -191,7 +191,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return apikeys.key_id(kh), None
 
     def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
+        raw_n = (self.headers.get("Content-Length") or "0").strip()
+        if not raw_n.isascii() or not raw_n.isdigit():
+            raise proto.ProtocolError("bad_request", "bad Content-Length")
+        n = int(raw_n)
         if n > 1 << 20:
             raise proto.ProtocolError("bad_request", "request body too large")
         try:
