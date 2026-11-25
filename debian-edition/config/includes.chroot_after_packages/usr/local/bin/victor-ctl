@@ -313,6 +313,8 @@ def main():
     sh["enable"].add_argument("--bind", default="0.0.0.0", help="LAN/VPN address sshd listens on")
     sh["enable"].add_argument("--keys-stdin", action="store_true",
                               help="read authorized_keys lines (options allowed) from stdin; otherwise reuse saved keys")
+    from victorlib import ctl_ext
+    ext = ctl_ext.register(sp)        # optional feature groups (victorlib/ctl_ext)
     a = ap.parse_args()
     try:
         if a.grp == "storage":
@@ -393,6 +395,8 @@ def main():
             out(a, backup_cmd(a))
         elif a.grp == "docs":
             out(a, docs_cmd(a))
+        elif a.grp in ext:
+            out(a, ext[a.grp].handle(a))
         elif a.grp == "versions":
             out(a, diag.collect()["image_facts"] | diag.collect()["llama_build"])
         elif a.grp == "input":
