@@ -31,6 +31,8 @@ systemctl mask sshd.socket 2>/dev/null || true
 # Installing bluez must not change that default, so do not enable either unit.
 systemctl disable bluetooth.service 2>/dev/null || true
 systemctl disable victor-input.service 2>/dev/null || true
+# Victorious Mesh is off by default: tailscaled only runs after the owner joins (victor-mesh / Control Center).
+systemctl disable tailscaled.service 2>/dev/null || true
 systemctl enable victor-boot-setup.service
 systemctl enable systemd-networkd.service
 
