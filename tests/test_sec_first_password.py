@@ -254,7 +254,11 @@ def test_nothing_but_victor_priv_changes_calls_set_password():
     callers = []
     for base in (DEB, PI):
         for dp, _, files in os.walk(base):
+            if "__pycache__" in dp:
+                continue
             for f in files:
+                if f in ("victor-priv", "victor-owner-setup", "victor-pi-priv", "vm_test.py"):
+                    continue          # the verb's own definition, and prose/attack text that names it
                 p = os.path.join(dp, f)
                 try:
                     text = open(p, errors="replace").read()
