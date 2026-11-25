@@ -1,0 +1,5 @@
+# Coral Edge TPU (USB Accelerator before and after its firmware loads; PCIe/M.2 apex). Access for the logged-in user
+# and the plugdev group only; nothing here installs or starts a runtime.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1a6e", ATTRS{idProduct}=="089a", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="18d1", ATTRS{idProduct}=="9302", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="apex", MODE="0660", GROUP="plugdev", TAG+="uaccess"
