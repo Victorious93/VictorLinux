@@ -506,6 +506,11 @@ def make_server(bind_ip, port, share_dir, auth_rec, cap=MAX_SHARE_BYTES, require
         address_family = fam
         daemon_threads = True
 
+        def server_bind(self):              # skip HTTPServer's reverse DNS lookup (getfqdn), which can hang offline
+            import socketserver
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = bind_ip, self.server_address[1]
+
     return S((bind_ip, port), H)
 
 
