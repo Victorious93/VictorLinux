@@ -100,7 +100,7 @@ def test_routes_refuse_when_off_then_draw(routes):
     st, body = R[("POST", "/api/imagegen/config")](None, {"enabled": True, "model": cfg["model"], "bin": cfg["bin"]})
     assert st == 200, body
     st, body = R[("POST", "/api/imagegen/generate")](None, {"prompt": "a fox", "steps": 4})
-    assert st == 200 and body["job"]["state"] == "running"
+    assert st == 200 and body["job"]["state"] in ("running", "done")   # the fake program can finish instantly
     for _ in range(100):
         j = R[("GET", "/api/imagegen/job")](None, {})[1]
         if j["state"] != "running":
