@@ -1,0 +1,22 @@
+[Unit]
+Description=Victorious Mesh read-only file share (mesh address only, port 8090; off by default)
+Documentation=https://github.com/Victorious93/VictorLinux/blob/main/docs/victorious-mesh.md
+After=tailscaled.service
+Requires=tailscaled.service
+# Started and stopped only by victor-mesh-priv. There is no [Install] section, so it can never start at boot by itself.
+
+[Service]
+Type=simple
+User=victor
+Group=victor
+EnvironmentFile=/etc/default/victor-mesh
+ExecStart=/usr/local/bin/victor-mesh share serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

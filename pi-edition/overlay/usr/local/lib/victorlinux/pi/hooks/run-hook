@@ -17,7 +17,8 @@ case "$name" in
     # TODO: reuse the hotspot tool once it is on main. NetworkManager (in the image) is the intended backend.
     todo "Wi-Fi hotspot tool is not on main yet";;
   mesh)
-    # TODO: reuse the Victorious Mesh (tailscale + Headscale) tool once it is on main; tailscale is not in this image.
-    todo "Victorious Mesh join tool is not on main yet";;
+    # Reuses victor-mesh from the Debian edition (tailscale from the optional hook; advertises tag:victorlinux-pi).
+    command -v victor-mesh >/dev/null || todo "victor-mesh is not installed"
+    exec victor-mesh "$@";;
   *) echo "hooks: scrcpy | phone-keyboard-bt | hotspot | mesh" >&2; exit 2;;
 esac

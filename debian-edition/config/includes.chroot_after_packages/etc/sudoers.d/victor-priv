@@ -1,4 +1,6 @@
 # The owner may run ONLY the validated helper without a password. Everything else requires the owner password
 # (sudo group membership is granted by first-run setup, not by default).
 victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-priv
+# Victorious Mesh root half: fixed verbs only (join/up/down/leave/set/share-password/apply).
+victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-mesh-priv
 Defaults:victor !requiretty

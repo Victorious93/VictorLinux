@@ -1,0 +1,58 @@
+#!/bin/bash
+# Optional tailscale/tailscaled for Victorious Mesh. Not in Debian 13; installed from Tailscale's apt repository
+# with a pinned keyring checksum. Never fails the image build: if anything is off, tailscale is left out and
+# victor-mesh says so. The repository and key are removed afterwards (no runtime updates), and tailscaled is
+# disabled so the mesh stays OFF until the owner joins. Shared by the Debian and Pi editions.
+set -u
+
+log() { echo "optional-tailscale: $*" >&2; }
+
+if [ -f /usr/share/victorlinux/versions.env ]; then
+  # shellcheck source=/dev/null
+  . /usr/share/victorlinux/versions.env
+fi
+repo="${TAILSCALE_REPO:-https://pkgs.tailscale.com/stable/debian}"
+want="${TAILSCALE_KEYRING_SHA256:-}"
+suite="${DEBIAN_SUITE:-trixie}"
+key=/usr/share/keyrings/victor-tailscale-build.gpg
+list=/etc/apt/sources.list.d/victor-tailscale.list
+export DEBIAN_FRONTEND=noninteractive
+
+cleanup() {
+  rm -f "$list" "$key"
+  apt-get update -qq >/dev/null 2>&1 || true
+}
+
+disable_unit() { systemctl disable tailscaled.service >/dev/null 2>&1 || true; }
+
+if command -v tailscale >/dev/null 2>&1; then
+  log "already installed"
+  disable_unit
+  exit 0
+fi
+if [ -z "$want" ]; then
+  log "no pinned keyring checksum; leaving tailscale out"
+  exit 0
+fi
+trap cleanup EXIT
+if ! curl -fsSL --proto '=https' --tlsv1.2 -o "$key" "$repo/$suite.noarmor.gpg"; then
+  log "could not download the Tailscale keyring; leaving tailscale out"
+  exit 0
+fi
+got="$(sha256sum "$key" | cut -d' ' -f1)"
+if [ "$got" != "$want" ]; then
+  log "keyring checksum mismatch ($got); leaving tailscale out"
+  exit 0
+fi
+printf 'deb [signed-by=%s] %s %s main\n' "$key" "$repo" "$suite" > "$list"
+if ! apt-get update -o Dir::Etc::sourcelist="$list" -o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0; then
+  log "could not fetch the Tailscale index; leaving tailscale out"
+  exit 0
+fi
+if apt-get install -y --no-install-recommends tailscale; then
+  log "installed $(dpkg-query -W -f='${Version}' tailscale 2>/dev/null)"
+  disable_unit
+else
+  log "install failed; leaving tailscale out so the image can still build"
+fi
+exit 0

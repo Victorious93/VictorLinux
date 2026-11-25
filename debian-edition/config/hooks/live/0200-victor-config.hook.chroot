@@ -42,6 +42,8 @@ systemctl disable ssh.service ssh.socket 2>/dev/null || true
 # Bluetooth and the Wi-Fi input receiver stay off until the owner turns them on.
 systemctl disable bluetooth.service 2>/dev/null || true
 systemctl disable victor-input.service 2>/dev/null || true
+# Victorious Mesh is off by default (the tailscale package enables tailscaled on install; undo that).
+systemctl disable tailscaled.service 2>/dev/null || true
 systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer fstrim.timer 2>/dev/null || true
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable nftables.service victor-storage.service victor-access.service 2>/dev/null || true

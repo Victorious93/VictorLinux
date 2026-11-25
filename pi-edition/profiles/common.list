@@ -36,6 +36,7 @@ nano
 htop
 usbutils
 nftables
+ethtool
 openssh-server
 udisks2
 parted
