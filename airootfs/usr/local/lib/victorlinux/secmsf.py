@@ -142,6 +142,8 @@ class MetasploitRpcClient:
         return cid.decode() if isinstance(cid, bytes) else cid
 
     def console_write(self, cid, line):
+        if "\n" in line.rstrip("\n") or "\r" in line:      # one call = one console command (defence in depth)
+            raise ValueError("refusing a console line with an embedded line break")
         self._call("console.write", self._tok(), cid, line if line.endswith("\n") else line + "\n")
 
     def console_read(self, cid):

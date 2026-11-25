@@ -8,6 +8,11 @@ import os
 import shutil
 import subprocess
 
+try:
+    import safefs
+except ImportError:           # Debian/Pi keep it in the victorlib package
+    from victorlib import safefs
+
 KEY_TYPES = ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
              "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")
 MAX_LINE = 4096
@@ -89,32 +94,39 @@ def valid_keys(text):
     return keys
 
 
-def count_keys(path):
+def read_text(path):
+    """Contents of a keys file, or '' when it is missing, unreadable or reached through a symlink.
+    Root helpers call this on files inside folders an unprivileged user (or an untrusted drive) controls."""
     try:
-        with open(path) as f:
-            return len([l for l in f if l.strip() and not l.lstrip().startswith("#")])
+        dfd = safefs.open_dir(os.path.dirname(path))
     except OSError:
-        return 0
+        return ""
+    try:
+        return safefs.read_file(dfd, os.path.basename(path), MAX_FILE + 1) or ""
+    except OSError:
+        return ""
+    finally:
+        os.close(dfd)
 
 
-def write_keys(path, keys, uid=None, gid=None):
-    d = os.path.dirname(path)
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    tmp = f"{path}.tmp{os.getpid()}"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write("\n".join(keys) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    if uid is not None:
-        os.chown(tmp, uid, gid)
-    os.replace(tmp, path)
+def count_keys(path):
+    return len([l for l in read_text(path).splitlines() if l.strip() and not l.lstrip().startswith("#")])
+
+
+def write_keys(path, keys, uid=None, gid=None, dir_mode=None):
+    """Atomically replace `path`. Never follows a symlink in the folder or at the file, never reuses a planted temp file."""
+    dfd = safefs.open_dir(os.path.dirname(path), create=True)
+    try:
+        safefs.chown_dir(dfd, uid, gid, dir_mode)
+        safefs.write_file(dfd, os.path.basename(path), "\n".join(keys) + "\n", uid, gid, 0o600)
+    finally:
+        os.close(dfd)
 
 
 def persist_keys(src, dst, uid=None, gid=None):
     """Copy the live authorized_keys to its persistent copy (0600). Returns True if written."""
     try:
-        keys = valid_keys(open(src).read())
+        keys = valid_keys(read_text(src))
     except (OSError, SSHKeyError):
         return False
     if not keys:
@@ -125,17 +137,13 @@ def persist_keys(src, dst, uid=None, gid=None):
 
 def restore_keys(saved, live, uid, gid):
     """If the live file is missing/empty and a saved copy exists, re-create it. Returns the number of keys restored."""
-    if count_keys(live) or not os.path.isfile(saved):
+    if count_keys(live) or not read_text(saved):
         return 0
     try:
-        keys = valid_keys(open(saved).read())
+        keys = valid_keys(read_text(saved))
     except (OSError, SSHKeyError):
         return 0
     if not keys:
         return 0
-    d = os.path.dirname(live)
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    os.chown(d, uid, gid)
-    os.chmod(d, 0o700)
-    write_keys(live, keys, uid, gid)
+    write_keys(live, keys, uid, gid, dir_mode=0o700)
     return len(keys)
