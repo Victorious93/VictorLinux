@@ -62,7 +62,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   console.log('PASS fleet tab start/pair/stop');
   // Mesh tab: off by default, nothing preset, bad input refused before anything privileged runs, key field cleared.
   await page.locator('[data-t="mesh"]').click();
-  await page.waitForFunction(() => /Not joined|not installed/.test(document.getElementById('meshState').textContent));
+  await page.waitForFunction(() => /Not joined|not installed/.test(document.getElementById('meshState').textContent)
+    && document.querySelectorAll('.meshT:disabled').length === 5);
   assert.equal(await page.locator('#meshUrl').inputValue(), '');
   assert.equal(await page.locator('#meshKey').getAttribute('type'), 'password');
   assert.equal(await page.locator('.meshT:checked').count(), 0);

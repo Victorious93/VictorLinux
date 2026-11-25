@@ -8,11 +8,11 @@
    <button class="b" id="bMeshJoin">Join mesh</button></div>
   <div class="row"><button class="b s" id="bMeshUp">Connect</button><button class="b s" id="bMeshDown">Disconnect</button><button class="b s" id="bMeshRef">Refresh</button><button class="b d" id="bMeshLeave">Leave mesh</button></div></div>
  <div class="card" id="meshOpts"><h2>Mesh options (each off by default)</h2>
-  <div class="row"><label><input type="checkbox" class="meshT" data-k="exit-node" data-s="exit_node"> Offer this PC as an exit node</label></div>
-  <div class="row"><label><input type="checkbox" class="meshT" data-k="wol" data-s="wol"> Wake-on-LAN (magic packet) on wired network cards</label></div>
-  <div class="row"><label><input type="checkbox" class="meshT" data-k="taildrop" data-s="taildrop"> Receive files sent with Taildrop</label></div>
-  <div class="row"><label><input type="checkbox" class="meshT" data-k="ssh" data-s="ssh"> SSH over the mesh only (key login, port 22 on tailscale0)</label></div>
-  <div class="row"><label><input type="checkbox" class="meshT" data-k="share" data-s="share"> Read-only file share for the app (mesh address, port 8090, password)</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="exit-node" data-s="exit_node" disabled> Offer this PC as an exit node</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="wol" data-s="wol" disabled> Wake-on-LAN (magic packet) on wired network cards</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="taildrop" data-s="taildrop" disabled> Receive files sent with Taildrop</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="ssh" data-s="ssh" disabled> SSH over the mesh only (key login, port 22 on tailscale0)</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="share" data-s="share" disabled> Read-only file share for the app (mesh address, port 8090, password)</label></div>
   <div id="meshPw"></div>
   <div class="row"><button class="b s" id="bMeshPw">Make a new share password</button></div>
   <p class="mut">Add files with <code>victor-mesh share add FILE</code>. The share is capped at 2 GB and nobody can upload or delete. From another device: <code>curl -u mesh:PASSWORD -O http://MESH-IP:8090/f/NAME</code>.</p>

@@ -435,10 +435,11 @@ class App(tk.Tk):
         for t, fn in (("Join mesh", self.mesh_join), ("Connect", lambda: self.mesh_do("up")), ("Disconnect", lambda: self.mesh_do("down")),
                       ("Refresh", self.mesh_refresh), ("Leave mesh", self.mesh_leave)):
             ttk.Button(b, text=t, command=fn).pack(side="left", padx=2)
-        self.mesh_vars = {}
+        self.mesh_vars, self.mesh_checks = {}, {}
         for key, skey, label in self.MESH_TOGGLES:
             v = tk.BooleanVar(value=False); self.mesh_vars[skey] = v
-            ttk.Checkbutton(f, text=label, variable=v, command=lambda k=key, var=v: self.mesh_set(k, var)).pack(anchor="w")
+            c = ttk.Checkbutton(f, text=label, variable=v, command=lambda k=key, var=v: self.mesh_set(k, var), state="disabled")
+            c.pack(anchor="w"); self.mesh_checks[skey] = c
         b2 = ttk.Frame(f); b2.pack(fill="x", pady=4)
         ttk.Button(b2, text="Make a new share password", command=lambda: self.mesh_do("share", "password")).pack(side="left", padx=2)
         ttk.Button(b2, text="Share a file…", command=self.mesh_share_add).pack(side="left", padx=2)
@@ -447,9 +448,12 @@ class App(tk.Tk):
     def _mesh_show(self, r):
         self.out(self.mesh_out, json.dumps(r, indent=2) if not isinstance(r, str) else r)
         if isinstance(r, dict) and "toggles" in r:
+            joined = bool(r.get("joined"))
             for k, v in r["toggles"].items():
                 if k in self.mesh_vars:
                     self.mesh_vars[k].set(bool(v))
+                if k in self.mesh_checks:
+                    self.mesh_checks[k].configure(state="normal" if joined else "disabled")
             if r.get("control_url") and not self.mesh_url.get():
                 self.mesh_url.set(r["control_url"])
 

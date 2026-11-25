@@ -320,9 +320,11 @@ def test_control_centers_have_join_mesh():
     for t in ('id="t-mesh"', 'id="meshUrl"', 'id="meshKey" type="password"', "Join mesh", 'data-k="exit-node"', 'data-k="wol"',
               'data-k="taildrop"', 'data-k="share"', 'data-k="ssh"'):
         assert t in html
+    assert all("disabled" in line for line in html.splitlines() if 'class="meshT"' in line)
     assert '"/api/mesh"' in (LIB / "control_center.py").read_text()
     tk = (DEB / "usr/local/bin/victor-control").read_text()
     assert "self.tab_mesh()" in tk and "def tab_mesh" in tk and '"--key-stdin"' in tk and 'show="•"' in tk.replace("show=show", 'show="•"')
+    assert 'state="disabled"' in tk and "self.mesh_checks" in tk and 'state="normal" if joined else "disabled"' in tk
     assert (ROOT / "docs/victorious-mesh.md").read_text().count("tag:victorlinux-pi:22,8080,8090") == 1
 
 
