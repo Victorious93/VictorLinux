@@ -187,3 +187,20 @@ def test_fleet_tls_helper_survives_a_stalled_client(tmp_path):
     sys.path.insert(0, str(ROOT / "fleet"))
     from victorfleet import server as fleet_server
     _generic_stall_check(fleet_server.tls_per_connection, tmp_path)
+
+
+def test_control_center_non_ascii_token_gets_401_not_a_dropped_connection(tmp_path, monkeypatch):
+    import control_center as cc
+    monkeypatch.setenv("VICTOR_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(cc, "APP", cc.App(), raising=False)
+    server = cc.Server(("127.0.0.1", 0), cc.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        s = socket.create_connection(("127.0.0.1", server.server_port), timeout=4)
+        s.sendall(b"GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Victor-Token: caf\xe9\r\nConnection: close\r\n\r\n")
+        got = s.recv(64)
+        s.close()
+        assert b" 401 " in got.split(b"\r\n")[0], got        # used to raise TypeError in compare_digest and drop the connection
+    finally:
+        server.shutdown()
+        server.server_close()
