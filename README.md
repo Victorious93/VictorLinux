@@ -20,7 +20,7 @@ Works on its own; fleet integration (droidcommand-AI) is optional
 VictorLinux boots a PC from a USB drive, or from an ISO exposed by [Victorious Flash](https://github.com/Victorious93/victorious-flash) on a supported rooted Android phone.
 Inference runs on the **PC's** hardware, with no telemetry, no automatic downloads and no cloud fallback.
 
-[Storage](#use-the-storage-you-already-own) · [Install](#install--download) · [Build](#build-from-source) · [Editions](#choose-an-edition) · [Boot media](#boot-media) · [Capacity & filesystems](#capacity-and-filesystems) · [Troubleshooting](#troubleshooting) · [Docs](#documentation) · [Status](#status-and-testing)
+[Storage](#use-the-storage-you-already-own) · [Install](#install--download) · [Build](#build-from-source) · [Editions](#choose-an-edition) · [Boot media](#boot-media) · [Capacity & filesystems](#capacity-and-filesystems) · [Troubleshooting](#troubleshooting) · [Manual](docs/MANUAL.md) · [Docs](#documentation) · [Status](#status-and-testing)
 
 ## Features
 
@@ -183,6 +183,7 @@ Import a model with `victor-model-import FILE.gguf` (or `--to-storage` for a cho
 
 ## Documentation
 
+[User manual](docs/MANUAL.md) · [Boot checklist](docs/BOOT_CHECKLIST.md) · [Security audit](docs/SECURITY_AUDIT.md) ·
 [Storage](docs/storage.md) · [Boot media / USB](docs/usb.md) · [Build](docs/build.md) · [Hardware & models](docs/hardware-and-models.md) · [AMD GPU](docs/amd-gpu.md) · [Remote access](docs/remote-access.md) ·
 [Security](docs/security.md) · [Maintenance](docs/maintenance.md) · [Fleet integration](docs/fleet-integration.md) · [Companion API](docs/companion-api.md) · [Flash companion changes](docs/flash-companion-changes.md) ·
 [Phone mirroring](docs/phone-mirroring.md) · [Phone as keyboard](docs/phone-as-keyboard.md) · [Victorious Mesh](docs/victorious-mesh.md) · [Debian edition](debian-edition/README.md) · [Raspberry Pi edition](docs/raspberry-pi.md)

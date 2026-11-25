@@ -99,9 +99,61 @@ def capabilities(model_path=None):
     return caps
 
 
+def tls_per_connection(server, ctx, handshake_timeout=15):
+    """Serve TLS from a plain listening socket, doing each handshake in the connection's own thread with a timeout.
+    Wrapping the LISTENING socket (`server.socket = ctx.wrap_socket(...)`) makes accept() perform the handshake, so one
+    client that connects and sends nothing stalls the whole service for everyone (reproduced). Not used by plain HTTP."""
+    def get_request():
+        conn, addr = server.socket.accept()
+        conn.settimeout(handshake_timeout)
+        return conn, addr
+
+    orig_finish = server.finish_request
+
+    def finish_request(request, client_address):
+        try:
+            tls = ctx.wrap_socket(request, server_side=True)
+        except (OSError, ValueError):          # ssl.SSLError and socket.timeout are OSErrors; scanners are routine
+            return
+        try:
+            tls.settimeout(None)               # handler classes set their own read timeout in setup()
+            orig_finish(tls, client_address)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
+
+    orig_error = server.handle_error
+
+    def handle_error(request, client_address):
+        import sys
+        if isinstance(sys.exc_info()[1], OSError):     # resets, TLS EOF and read timeouts of scanners/phones are routine
+            return
+        orig_error(request, client_address)
+
+    server.get_request = get_request
+    server.finish_request = finish_request
+    server.handle_error = handle_error
+    return server
+
+
+def content_length(headers, limit=None):
+    """Content-Length as a non-negative int. Raises ValueError on garbage/negative (rfile.read(-1) would hang the thread)
+    and on a body larger than `limit`."""
+    raw = (headers.get("Content-Length") or "0").strip()
+    if not raw.isascii() or not raw.isdigit():
+        raise ValueError("bad Content-Length")
+    n = int(raw)
+    if limit is not None and n > limit:
+        raise ValueError("request body too large")
+    return n
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "VictorGateway"
+    timeout = 120        # idle/stalled clients are dropped; model replies are streamed OUT, never waited for on this socket
     cfg = None
 
     def log_message(self, fmt, *a):   # keep logs free of tokens/URLs with queries
@@ -144,7 +196,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(405, {"v": 1, "ok": False, "err": "bad_request"}, {"Allow": "POST"})
         if not self.cfg["tls"] and self.cfg["bind"] not in ("127.0.0.1", "::1", "localhost"):
             return self._json(403, {"v": 1, "ok": False, "err": "tls_required"})
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = content_length(self.headers, 4096)
+        except ValueError:
+            n = 0
         if not 0 < n <= 4096:
             return self._json(400, {"v": 1, "ok": False, "err": "bad_request"})
         try:
@@ -214,9 +269,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---- Ollama-compatible subset (so Ollama-only clients can use this PC) -------------------------
     # Translated onto llama-server. Deliberately NOT forwarded: tools/functions, images, model pull/push/delete/create.
     def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > self.cfg["max_body"]:
-            raise ValueError("request body too large")
+        n = content_length(self.headers, self.cfg["max_body"])
         try:
             return json.loads(self.rfile.read(n) or b"{}") if n else {}
         except ValueError:
@@ -363,9 +416,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return False
 
     def _proxy(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > self.cfg["max_body"]:
-            return self._json(413, {"error": {"message": "request body too large"}})
+        try:
+            n = content_length(self.headers, self.cfg["max_body"])
+        except ValueError as e:
+            return self._json(413 if "large" in str(e) else 400, {"error": {"message": str(e)}})
         body = self.rfile.read(n) if n else None
         hdrs = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
         hdrs["Authorization"] = "Bearer " + self.cfg["upstream_key"]
@@ -451,7 +505,7 @@ def main():
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(cert, key)
-        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        tls_per_connection(srv, ctx)
     sys.stderr.write(f"{tc.now()} gateway listening on {cfg['bind']}:{cfg['port']} "
                      f"tls={cfg['tls']} auth={'required' if cfg['require_auth'] else 'off (loopback only)'}\n")
     sys.stderr.flush()
