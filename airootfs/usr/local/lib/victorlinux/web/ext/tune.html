@@ -1,0 +1,13 @@
+<section id="t-tune" data-tab="tune" data-icon="chip" data-label="Tune">
+ <div class="hero"><div><div class="eyebrow">Benchmark &amp; auto-tune</div><h2>Measured on <em>this PC.</em></h2><p>One short benchmark tries a few GPU-layer and thread settings for the selected model and keeps the fastest. The result is saved for this PC only and used when the model starts.</p></div><span class="hero-badge" id="tuBadge">● Not tuned</span></div>
+ <div id="tuWarn"></div>
+ <div class="grid">
+  <div class="card"><h2><svg><use href="#i-chip"/></svg>Run the benchmark</h2><p class="mut" id="tuModel">Selected model: …</p>
+   <p class="mut">Stop the model first. Up to 9 combinations run with llama-bench (256-token prompt, 64 generated tokens, 2 repeats). The context is set to the largest size that fits in memory.</p>
+   <div class="row"><button class="b" id="tuRun">Run benchmark</button></div><div class="bar" id="tuBar" hidden><i style="width:100%"></i></div><div id="tuJob" class="mut"></div></div>
+  <div class="card"><h2>This PC's profile for the selected model</h2><div id="tuCur"><p class="mut">No profile yet.</p></div>
+   <div class="row"><input type="checkbox" id="tuApply"><label for="tuApply" style="margin:0">Use saved profiles when starting (only where settings are on automatic)</label></div>
+   <div class="row"><button class="b s" id="tuForget">Forget this model's profile</button><button class="b d" id="tuForgetAll">Forget all profiles for this PC</button></div></div>
+ </div>
+ <div class="card"><h2>All profiles saved for this PC</h2><div id="tuAll"></div><p class="mut" id="tuMid"></p></div>
+</section>
