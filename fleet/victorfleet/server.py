@@ -67,7 +67,7 @@ class FleetService:
         class H(WorkerHandler):
             service = svc
         self.httpd = ThreadedHTTPS((self.bind, self.cfg["port"]), H)
-        self.httpd.socket = tlsutil.server_context(self.crt, self.key).wrap_socket(self.httpd.socket, server_side=True)
+        tls_per_connection(self.httpd, tlsutil.server_context(self.crt, self.key))
         self.port = self.httpd.server_address[1]
         if os.path.exists(self.sock_path):
             os.unlink(self.sock_path)
@@ -169,6 +169,45 @@ class FleetService:
         return os.path.join(self.dir, "artifacts")
 
 
+def tls_per_connection(server, ctx, handshake_timeout=15):
+    """Serve TLS from a plain listening socket, doing each handshake in the connection's own thread with a timeout.
+    Wrapping the LISTENING socket (`server.socket = ctx.wrap_socket(...)`) makes accept() perform the handshake, so one
+    client that connects and sends nothing stalls the whole service for everyone (reproduced). Not used by plain HTTP."""
+    def get_request():
+        conn, addr = server.socket.accept()
+        conn.settimeout(handshake_timeout)
+        return conn, addr
+
+    orig_finish = server.finish_request
+
+    def finish_request(request, client_address):
+        try:
+            tls = ctx.wrap_socket(request, server_side=True)
+        except (OSError, ValueError):          # ssl.SSLError and socket.timeout are OSErrors; scanners are routine
+            return
+        try:
+            tls.settimeout(None)               # handler classes set their own read timeout in setup()
+            orig_finish(tls, client_address)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
+
+    orig_error = server.handle_error
+
+    def handle_error(request, client_address):
+        import sys
+        if isinstance(sys.exc_info()[1], OSError):     # resets, TLS EOF and read timeouts of scanners/phones are routine
+            return
+        orig_error(request, client_address)
+
+    server.get_request = get_request
+    server.finish_request = finish_request
+    server.handle_error = handle_error
+    return server
+
+
 class ThreadedHTTPS(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -204,7 +243,10 @@ class Base(http.server.BaseHTTPRequestHandler):
         self._json(code, {"error": e.to_dict()})
 
     def _body(self, limit):
-        n = int(self.headers.get("Content-Length") or 0)
+        raw = (self.headers.get("Content-Length") or "0").strip()
+        if not raw.isascii() or not raw.isdigit():
+            raise ProtocolError("bad_request", "bad Content-Length")
+        n = int(raw)
         if n > limit:
             raise ProtocolError("too_large", f"body over {limit} bytes")
         return self.rfile.read(n)

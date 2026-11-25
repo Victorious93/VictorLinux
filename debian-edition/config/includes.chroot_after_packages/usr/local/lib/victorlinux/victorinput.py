@@ -711,7 +711,7 @@ class InputApp:
         self.cert, self.tls_fp = cert, fp
         ctx, self.tls_fp, self.cert = ssl_context(self.root)
         public = ThreadingHTTPServer((self.bind, self.port), _make_public_handler(self))
-        public.socket = ctx.wrap_socket(public.socket, server_side=True)
+        tls_per_connection(public, ctx)
         admin = ThreadingHTTPServer(("127.0.0.1", self.admin_port), _make_admin_handler(self))
         self.port = public.server_address[1]
         self.admin_port = admin.server_address[1]
@@ -751,15 +751,40 @@ def firewall_note(bind, port):
             f"Close the port when you turn the service off.")
 
 
+def _content_length(handler):
+    """Content-Length as a non-negative int, or None when missing-as-zero is not what the client sent (garbage or negative).
+    A negative length used to reach rfile.read(-1), which blocks until the client closes: a one-request thread hang."""
+    raw = (handler.headers.get("Content-Length") or "0").strip()
+    if not raw.isascii() or not raw.isdigit():
+        return None
+    return int(raw)
+
+
 def _json_body(handler):
-    n = int(handler.headers.get("Content-Length") or 0)
-    if n > MSG_MAX:
+    n = _content_length(handler)
+    if n is None or n > MSG_MAX:
         return None
     raw = handler.rfile.read(n) if n else b"{}"
     try:
         return json.loads(raw.decode())
     except (ValueError, UnicodeDecodeError):
         return None
+
+
+_ADMIN_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+
+
+def _admin_request_ok(handler, post):
+    """The admin API is loopback-only, but any web page in the owner's browser can still send requests to 127.0.0.1.
+    Refuse DNS rebinding (Host is not a loopback name), cross-site requests (a browser adds Origin; curl and the Control
+    Center do not) and POSTs that are not JSON (a non-JSON POST needs no CORS preflight). Returns (ok, status)."""
+    host = (handler.headers.get("Host") or "").strip().lower()
+    name = host[:host.find("]") + 1] if host.startswith("[") else host.split(":")[0]
+    if name not in _ADMIN_HOSTS or handler.headers.get("Origin") is not None:
+        return False, 403
+    if post and (handler.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+        return False, 415
+    return True, 200
 
 
 def _send_json(handler, code, obj):
@@ -772,9 +797,49 @@ def _send_json(handler, code, obj):
     handler.wfile.write(data)
 
 
+def tls_per_connection(server, ctx, handshake_timeout=15):
+    """Serve TLS from a plain listening socket, doing each handshake in the connection's own thread with a timeout.
+    Wrapping the LISTENING socket (`server.socket = ctx.wrap_socket(...)`) makes accept() perform the handshake, so one
+    client that connects and sends nothing stalls the whole service for everyone (reproduced). Not used by plain HTTP."""
+    def get_request():
+        conn, addr = server.socket.accept()
+        conn.settimeout(handshake_timeout)
+        return conn, addr
+
+    orig_finish = server.finish_request
+
+    def finish_request(request, client_address):
+        try:
+            tls = ctx.wrap_socket(request, server_side=True)
+        except (OSError, ValueError):          # ssl.SSLError and socket.timeout are OSErrors; scanners are routine
+            return
+        try:
+            tls.settimeout(None)               # handler classes set their own read timeout in setup()
+            orig_finish(tls, client_address)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
+
+    orig_error = server.handle_error
+
+    def handle_error(request, client_address):
+        import sys
+        if isinstance(sys.exc_info()[1], OSError):     # resets, TLS EOF and read timeouts of scanners/phones are routine
+            return
+        orig_error(request, client_address)
+
+    server.get_request = get_request
+    server.finish_request = finish_request
+    server.handle_error = handle_error
+    return server
+
+
 def _make_public_handler(app):
     class Public(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        timeout = 15      # an unauthenticated peer may not hold a thread open by trickling bytes; cleared once authenticated
 
         def log_message(self, fmt, *args):
             # Never log tokens, pairing secrets or message bodies.
@@ -792,6 +857,7 @@ def _make_public_handler(app):
                 return self.send_error(404)
             body = _json_body(self)
             if body is None:
+                self.close_connection = True
                 return _send_json(self, 400, {"v": 1, "ok": False, "err": "bad_message"})
             code, obj = app.redeem_pair(body)
             # The response may contain a one-time Bearer token; it is not logged.
@@ -816,6 +882,7 @@ def _make_public_handler(app):
                     ws_send(sock, json.dumps({"v": 1, "type": "error", "err": "unauthorized"}))
                     return
                 device_id = key_id(h)
+                sock.settimeout(None)          # authenticated: an idle phone may stay connected
                 ws_send(sock, json.dumps({"v": 1, "type": "ok", "device_id": device_id}))
             try:
                 while True:
@@ -829,6 +896,7 @@ def _make_public_handler(app):
                         if msg["type"] == "auth":
                             out = app.session.handle(raw)
                             device_id = out["device_id"]
+                            sock.settimeout(None)
                             ws_send(sock, json.dumps(out))
                             continue
                         if not device_id:
@@ -852,7 +920,16 @@ def _make_admin_handler(app):
         def log_message(self, fmt, *args):
             return
 
+        def _guard(self, post):
+            ok, status = _admin_request_ok(self, post)
+            if not ok:
+                self.close_connection = True
+                _send_json(self, status, {"error": "forbidden" if status == 403 else "send application/json"})
+            return ok
+
         def do_GET(self):
+            if not self._guard(False):
+                return
             path = self.path.split("?")[0]
             if path == "/status":
                 return _send_json(self, 200, app.status())
@@ -861,6 +938,8 @@ def _make_admin_handler(app):
             self.send_error(404)
 
         def do_POST(self):
+            if not self._guard(True):
+                return
             path = self.path.split("?")[0]
             body = _json_body(self) or {}
             try:

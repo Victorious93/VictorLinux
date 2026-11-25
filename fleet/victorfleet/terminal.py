@@ -183,7 +183,7 @@ class TerminalHub:
             elif st == "open":
                 if s.state not in ("requested", "awaiting_approval"):
                     return
-                if not hmac.compare_digest(p.get("binding", ""), s.binding):
+                if not hmac.compare_digest(str(p.get("binding", "")).encode(), str(s.binding).encode()):
                     self._finish(s, "failed", "approval binding mismatch (phone approved something else)")
                     return
                 s.state, s.opened = "open", now
@@ -236,7 +236,7 @@ class TerminalHub:
 
     def desktop_exchange(self, sid, token, body):
         s = self._get(sid)
-        if not hmac.compare_digest(token or "", s.attach_token):
+        if not hmac.compare_digest(str(token or "").encode(), str(s.attach_token).encode()):
             raise ProtocolError("unauthorized", "not the client that opened this session")
         now = self.clock()
         with self.lock:

@@ -1226,7 +1226,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _auth(self):
         t = self.headers.get("X-Victor-Token", "")
-        return hmac.compare_digest(t, APP.token)
+        return hmac.compare_digest(t.encode("utf-8", "replace"), APP.token.encode())
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
