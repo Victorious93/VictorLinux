@@ -115,9 +115,17 @@ def _str(d, key, maxlen=MAX_STRING, optional=False, default=None):
     return v
 
 
+def _no_control(value, name):
+    """A value that ends up as one line of a Metasploit console / SET stdin sequence must not carry any control character:
+    a bare "\\n" would start a second console command (msfconsole has `irb`/`ruby`, i.e. code execution)."""
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        raise ProtocolError("bad_request", f"'{name}' contains a control character")
+    return value
+
+
 def _id(d, key, optional=False, default=None):
     v = _str(d, key, 96, optional, default)
-    if v is not None and not ID_RE.match(v):
+    if v is not None and not ID_RE.fullmatch(v):
         raise ProtocolError("bad_request", f"'{key}' is not a valid identifier")
     return v
 
@@ -134,14 +142,13 @@ def validate_options(options):
         raise ProtocolError("bad_request", f"more than {MAX_OPTIONS} options")
     out = {}
     for k, v in options.items():
-        if not isinstance(k, str) or not re.match(r"^[A-Za-z0-9_.]{1,64}$", k):
+        if not isinstance(k, str) or not re.fullmatch(r"[A-Za-z0-9_.]{1,64}", k):
             raise ProtocolError("bad_request", f"option key '{k}' invalid")
         if not isinstance(v, str):
             raise ProtocolError("bad_request", f"option '{k}' value must be a string")
         if len(v) > MAX_OPTION_VALUE:
             raise ProtocolError("bad_request", f"option '{k}' value too long")
-        if "\x00" in v or "\r" in v:
-            raise ProtocolError("bad_request", f"option '{k}' contains a control character")
+        _no_control(v, f"option {k}")
         out[k] = v
     return out
 
@@ -176,9 +183,9 @@ def _validate_metasploit_params(p):
     if p["module_type"] not in ("exploit", "auxiliary", "post"):
         raise ProtocolError("bad_request", "module_type must be exploit|auxiliary|post")
     mod = _str(p, "module_path", 256)
-    if not re.match(r"^[a-z0-9_./-]{1,256}$", mod):
+    if not re.fullmatch(r"[a-z0-9_./-]{1,256}", mod):
         raise ProtocolError("bad_request", "module_path has an unsafe shape")
-    target = _str(p, "target_host", 256)
+    target = _no_control(_str(p, "target_host", 256), "target_host")
     if not target.strip():
         raise ProtocolError("bad_request", "target_host must not be blank")
     p["target_port"] = p.get("target_port")
@@ -186,7 +193,7 @@ def _validate_metasploit_params(p):
         raise ProtocolError("bad_request", "target_port must be 1-65535")
     validate_options(p.get("options"))
     if "payload" in p and p["payload"] is not None:
-        _str(p, "payload", 256)
+        _no_control(_str(p, "payload", 256), "payload")
 
 
 def _validate_setoolkit_params(p):
@@ -201,9 +208,9 @@ def _validate_setoolkit_params(p):
     if not host and not email:
         raise ProtocolError("bad_request", "setoolkit.attack requires target_host or target_email")
     if host is not None:
-        _str(p, "target_host", 256)
+        _no_control(_str(p, "target_host", 256), "target_host")
     if email is not None:
-        _str(p, "target_email", 256)
+        _no_control(_str(p, "target_email", 256), "target_email")
     validate_options(p.get("menu_answers_by_index") or {})
 
 

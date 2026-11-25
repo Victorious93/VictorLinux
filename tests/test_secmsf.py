@@ -94,3 +94,17 @@ def test_live_job_info_on_a_finished_job_is_unknown_job_not_a_crash():
     finally:
         c.logout()
     assert e.value.code == secmsf.ERR_UNKNOWN_JOB
+
+
+def test_console_write_refuses_embedded_line_breaks():
+    c = object.__new__(secmsf.MetasploitRpcClient)
+    sent = []
+    c._call = lambda *a: sent.append(a)
+    c._tok = lambda: "t"
+    for bad in ("set X 1\nirb", "set X 1\r", "a\n\nb"):
+        with pytest.raises(ValueError):
+            c.console_write("1", bad)
+    assert sent == []
+    c.console_write("1", "set X 1")
+    c.console_write("1", "run\n")
+    assert [a[3] for a in sent] == ["set X 1\n", "run\n"]
