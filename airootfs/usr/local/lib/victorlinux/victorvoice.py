@@ -115,5 +115,10 @@ def model_status(model_dir: str | None = None) -> dict[str, Any]:
     """Offline recogniser presence. The dashboard shows `help` and keeps manual control usable when missing."""
     d = model_dir or os.environ.get("VICTOR_STT_MODEL", os.path.expanduser("~/.local/share/victorlinux/stt"))
     ok = os.path.isdir(d) and any(os.scandir(d))
+    if ok and not os.path.isdir(os.path.join(d, "am")) and not os.path.isdir(os.path.join(d, "conf")):
+        # A model unzipped into the folder lands in a sub-folder (vosk-model-…/am, conf); use it when unambiguous.
+        subs = [e.path for e in os.scandir(d) if e.is_dir() and (os.path.isdir(os.path.join(e.path, "am")) or os.path.isdir(os.path.join(e.path, "conf")))]
+        if len(subs) == 1:
+            d = subs[0]
     return {"installed": ok, "path": d,
             "help": None if ok else f"No offline speech model found. Import one with `victor-model-import` or unpack a Vosk/whisper.cpp model into {d}. Buttons and shortcuts keep working."}
