@@ -14,7 +14,7 @@ MAX_LINE = 4096
 MAX_FILE = 65536
 
 
-class KeyError_(ValueError):
+class SSHKeyError(ValueError):
     pass
 
 
@@ -38,7 +38,7 @@ def tokens(line):
         else:
             cur.append(ch)
     if quoted:
-        raise KeyError_("unbalanced quote in the key options")
+        raise SSHKeyError("unbalanced quote in the key options")
     if cur:
         out.append("".join(cur))
     return out
@@ -47,15 +47,15 @@ def tokens(line):
 def split_line(line):
     """Return (options, keytype, blob, comment). options is '' when the line has none."""
     if any(c in line for c in "\n\r\0"):
-        raise KeyError_("one key per line, no control characters")
+        raise SSHKeyError("one key per line, no control characters")
     line = line.strip()
     if not line or len(line) > MAX_LINE:
-        raise KeyError_("empty or too long")
+        raise SSHKeyError("empty or too long")
     t = tokens(line)
     for i in (0, 1):
         if len(t) > i + 1 and t[i] in KEY_TYPES:
             return (t[0] if i == 1 else ""), t[i], t[i + 1], " ".join(t[i + 2:])
-    raise KeyError_("Unsupported key type. Paste a public key line such as: ssh-ed25519 AAAA... name")
+    raise SSHKeyError("Unsupported key type. Paste a public key line such as: ssh-ed25519 AAAA... name")
 
 
 def keygen_ok(line, keygen=None):
@@ -68,18 +68,18 @@ def keygen_ok(line, keygen=None):
 
 
 def validate_line(line):
-    """Return (clean_line, fingerprint_text). Raises KeyError_ for anything that is not a real public key."""
+    """Return (clean_line, fingerprint_text). Raises SSHKeyError for anything that is not a real public key."""
     split_line(line)
     fp = keygen_ok(line.strip())
     if not fp:
-        raise KeyError_("That is not a valid SSH public key.")
+        raise SSHKeyError("That is not a valid SSH public key.")
     return line.strip(), fp
 
 
 def valid_keys(text):
-    """All real key lines in a block of text (comments and blanks skipped). Raises KeyError_ on the first bad line."""
+    """All real key lines in a block of text (comments and blanks skipped). Raises SSHKeyError on the first bad line."""
     if len(text) > MAX_FILE:
-        raise KeyError_("too much input")
+        raise SSHKeyError("too much input")
     keys = []
     for raw in text.splitlines():
         s = raw.strip()
@@ -115,7 +115,7 @@ def persist_keys(src, dst, uid=None, gid=None):
     """Copy the live authorized_keys to its persistent copy (0600). Returns True if written."""
     try:
         keys = valid_keys(open(src).read())
-    except (OSError, KeyError_):
+    except (OSError, SSHKeyError):
         return False
     if not keys:
         return False
@@ -129,7 +129,7 @@ def restore_keys(saved, live, uid, gid):
         return 0
     try:
         keys = valid_keys(open(saved).read())
-    except (OSError, KeyError_):
+    except (OSError, SSHKeyError):
         return 0
     if not keys:
         return 0
