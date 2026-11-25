@@ -137,6 +137,21 @@ def priv(tmp_path, monkeypatch):
     monkeypatch.setattr(p, "time", Clock)
     Clock.t = 0.0
     monkeypatch.setattr(p, "installed", lambda: True)
+
+    real = p.safefs
+
+    class NonRootSafefs:               # same symlink-safe code, but the test user stands in for root (uid check / chown dropped)
+        UnsafePath = real.UnsafePath
+        read_file = staticmethod(real.read_file)
+
+        @staticmethod
+        def open_dir(path, uid=None, create=False, mode=0o700):
+            return real.open_dir(path, uid=None, create=create, mode=mode)
+
+        @staticmethod
+        def write_file(dfd, name, data, uid=None, gid=None, mode=0o600):
+            return real.write_file(dfd, name, data, mode=mode)
+    monkeypatch.setattr(p, "safefs", NonRootSafefs)
     return p
 
 
@@ -236,6 +251,55 @@ def test_restore_recreates_marker_from_persistent_storage(priv, monkeypatch, tmp
     monkeypatch.setenv("VICTOR_RUSTDESKV_PERSIST", str(persist))
     priv.cmd_restore()
     assert os.path.exists(rv.MARKER)
+
+
+def test_persistent_marker_is_written_and_removed_by_disable(priv, monkeypatch, tmp_path):
+    persist = tmp_path / "persist"
+    monkeypatch.setenv("VICTOR_RUSTDESKV_PERSIST", str(persist))
+    assert priv.write_marker_persistent() is True
+    assert (persist / "enabled").read_text() == "1\n"
+    monkeypatch.setattr(priv, "run", lambda cmd, timeout=30, **kw: subprocess.CompletedProcess(cmd, 0, "", ""))
+    priv.cmd_disable()
+    assert not (persist / "enabled").exists()
+
+
+def test_planted_symlink_for_the_persistent_folder_is_refused(priv, monkeypatch, tmp_path):
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    link = tmp_path / "persist"
+    link.symlink_to(victim)
+    monkeypatch.setenv("VICTOR_RUSTDESKV_PERSIST", str(link))
+    with pytest.raises(SystemExit):
+        priv.write_marker_persistent()
+    assert list(victim.iterdir()) == []                        # nothing was written through the link
+
+
+def test_planted_symlink_for_the_config_folder_is_refused(priv, monkeypatch, tmp_path):
+    persist = tmp_path / "persist"
+    persist.mkdir()
+    victim = tmp_path / "etc"
+    victim.mkdir()
+    (persist / "config").symlink_to(victim)
+    monkeypatch.setenv("VICTOR_RUSTDESKV_PERSIST", str(persist))
+    monkeypatch.setattr(rv, "CONFIG_DIR", str(tmp_path / "cfgdir"))
+    monkeypatch.setattr(priv, "run", lambda cmd, timeout=30, **kw: pytest.fail("must not mount: " + " ".join(cmd)))
+    with pytest.raises(SystemExit):
+        priv.cmd_mount()
+
+
+def test_config_folder_is_bound_by_fd_not_by_path(priv, monkeypatch, tmp_path):
+    persist = tmp_path / "persist"
+    monkeypatch.setenv("VICTOR_RUSTDESKV_PERSIST", str(persist))
+    monkeypatch.setattr(rv, "CONFIG_DIR", str(tmp_path / "cfgdir"))
+    seen = []
+
+    def fake_run(cmd, timeout=30, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1 if cmd[0] == "mountpoint" else 0, "", "")
+    monkeypatch.setattr(priv, "run", fake_run)
+    priv.cmd_mount()
+    mount = [c for c in seen if c[0] == "mount"][0]
+    assert mount[1] == "--bind" and mount[2].startswith("/proc/self/fd/")
 
 
 def test_restore_without_persistence_does_nothing(priv):
