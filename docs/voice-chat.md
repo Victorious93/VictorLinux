@@ -21,3 +21,11 @@ Turn it on, pick the models, then **Start talking**. The page records 16 kHz mon
 - `victor-ctl voice ask question.wav`, or the **Voice** tab in the Tk Control Center.
 
 Packages added for sound: Arch GUI images get `alsa-utils pipewire pipewire-alsa pipewire-pulse wireplumber`. Debian gets `alsa-utils pipewire-audio`.
+
+## Reuse with phone push-to-talk
+
+The existing push-to-talk pipeline (`victor-mic serve --ptt`, see [phone-microphone.md](phone-microphone.md)) can use the same whisper.cpp setup instead of Vosk:
+
+    victor-mic serve --ptt --ptt-backend whisper [--voice-config /path/to/voice.json]
+
+It reads the program and ggml model you picked here (default: `config/voice.json` on the data partition). Vosk stays the default. Audio is held in memory while the button is down and goes to a private temporary folder only for the one whisper.cpp call.

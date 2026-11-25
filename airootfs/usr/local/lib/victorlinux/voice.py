@@ -181,3 +181,38 @@ def speak(c, text, run=subprocess.run, tmpdir=None):
             raise VoiceError("Piper failed: " + ((r.stderr or "").strip().splitlines() or ["no audio written"])[-1][:200])
         with open(out, "rb") as f:
             return f.read()
+
+
+def pcm_to_wav(pcm, rate=16000):
+    """Wrap raw s16le mono PCM (what victor-mic / parec deliver) in a WAV header for whisper.cpp."""
+    return (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE" + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+            + b"data" + struct.pack("<I", len(pcm)) + pcm)
+
+
+class WhisperRecognizer:
+    """whisper.cpp as a backend for the existing push-to-talk pipeline (victorptt.Recognizer: accept / finish / reset).
+
+    Audio stays in memory while the button is held and only touches a private temporary folder for the one
+    whisper.cpp call. whisper.cpp reports no word confidence, so a non-empty transcript counts as confident and the
+    grammar in victorvoice still has to match it."""
+
+    def __init__(self, cfg, threads=4, run=subprocess.run):
+        b = find_bin(cfg.get("stt_bin", ""), STT_NAMES)
+        if not b or not cfg.get("stt_model") or not os.path.isfile(cfg["stt_model"]):
+            raise VoiceError("whisper.cpp is not set up: pick the program and a ggml model in Control Center > Voice "
+                             "(nothing is downloaded automatically).")
+        self.cfg, self.threads, self.run = dict(cfg), threads, run
+        self.reset()
+
+    def reset(self):
+        self._buf = bytearray()
+
+    def accept(self, pcm):
+        self._buf += pcm
+
+    def finish(self):
+        pcm, self._buf = bytes(self._buf), bytearray()
+        if len(pcm) < 16000 * 2 * 0.3:
+            return "", 0.0
+        text = transcribe(self.cfg, pcm_to_wav(pcm), threads=self.threads, run=self.run)
+        return text, (0.9 if text else 0.0)
