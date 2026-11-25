@@ -145,6 +145,17 @@ def cmd_fw_sync(port, bind, enabled):
         die("nft failed: " + r.stderr.strip())
 
 
+def cmd_hotspot_fw(iface, state):
+    """Let devices on the hotspot get an address (DHCP/DNS) and keep them isolated (no forwarding)."""
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,15}", iface) or not os.path.isdir(f"/sys/class/net/{iface}/wireless"):
+        die("not a Wi-Fi interface")
+    if state not in ("on", "off"):
+        die("state must be on or off")
+    r = run(["nft", "add" if state == "on" else "delete", "element", *NFT_TABLE, "hotspot_if", f"{{ {iface} }}"])
+    if r.returncode and state == "on":
+        die("nft failed: " + r.stderr.strip())
+
+
 def owner_hash():
     for l in open("/etc/shadow"):
         f = l.split(":")
@@ -353,7 +364,8 @@ def cmd_bt_unpair(mac):
 VERBS = {"storage-mount": (cmd_mount, 1), "storage-auto": (cmd_auto, 0), "storage-session": (cmd_session, 0),
          "storage-check": (cmd_check, 0), "storage-repair": (cmd_repair, 0), "fw-sync": (cmd_fw_sync, 3),
          "set-password": (cmd_password, 0), "ssh-enable": (cmd_ssh_enable, 2), "revoke": (cmd_revoke, 0),
-         "reset-owner": (cmd_reset_owner, 0), "owner-status": (cmd_owner_status, 0), "access-apply": (cmd_access_apply, 0), "smart": (cmd_smart, 1), "input-enable": (cmd_input_enable, 2), "input-disable": (cmd_input_disable, 0), "input-status": (cmd_input_status, 0), "bt-start": (cmd_bt_start, 0), "bt-confirm": (cmd_bt_confirm, 0), "bt-cancel": (cmd_bt_cancel, 0), "bt-status": (cmd_bt_status, 0), "bt-list": (cmd_bt_list, 0), "bt-unpair": (cmd_bt_unpair, 1)}
+         "reset-owner": (cmd_reset_owner, 0), "owner-status": (cmd_owner_status, 0), "access-apply": (cmd_access_apply, 0), "smart": (cmd_smart, 1), "input-enable": (cmd_input_enable, 2), "input-disable": (cmd_input_disable, 0), "input-status": (cmd_input_status, 0), "bt-start": (cmd_bt_start, 0), "bt-confirm": (cmd_bt_confirm, 0), "bt-cancel": (cmd_bt_cancel, 0), "bt-status": (cmd_bt_status, 0), "bt-list": (cmd_bt_list, 0), "bt-unpair": (cmd_bt_unpair, 1),
+         "hotspot-fw": (cmd_hotspot_fw, 2)}
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
