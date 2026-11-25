@@ -166,11 +166,17 @@ def owner_hash():
     return "!"
 
 
+FIRST_PASSWORD_MSG = ("The first owner password can only be set on the physical console (tty1, before the login screen): "
+                      "reboot and answer the VictorLinux prompt there. It cannot be set from a running session, because any program "
+                      "running as the owner could then take over the machine.")
+
+
 def require_current_password():
-    """First-run (account still locked) needs nothing; any later change needs the CURRENT password on stdin line 1."""
+    """Changing the owner password needs the CURRENT password on stdin line 1. A locked account has no password to prove,
+    so it cannot be changed here at all: the first password is set on the physical console (victor-owner-setup, root only)."""
     h = owner_hash()
     if h.startswith(("!", "*")) or h == "":
-        return
+        die(FIRST_PASSWORD_MSG)
     cur = sys.stdin.readline().rstrip("\n")
     parts = h.split("$")           # ['', '6', salt, hash]
     if len(parts) < 4 or parts[1] != "6":
@@ -311,10 +317,11 @@ def cmd_revoke():
 
 
 def cmd_reset_owner():
-    require_current_password()
-    run(["passwd", "-l", OWNER]); cmd_revoke()
+    if not ownertrust.owner_locked():
+        require_current_password()
+    run(["passwd", "-l", OWNER]); run(["gpasswd", "-d", OWNER, "sudo"]); cmd_revoke()
     ownertrust.remove(ownertrust.current_drive(), ownertrust.OWNER_SHADOW)
-    print("owner password removed; first-run setup will run again at next login")
+    print("owner password removed; reboot and set a new one on the physical console (tty1, before the login screen)")
 
 
 def cmd_owner_status():

@@ -32,11 +32,16 @@ def main():
     st.configure("Note.TLabel", foreground="#9AA7C0")
     f = ttk.Frame(root, padding=16); f.pack(fill="both", expand=True)
     ttk.Label(f, text="Welcome to VictorLinux on Raspberry Pi", style="Title.TLabel").grid(columnspan=2, sticky="w")
+    locked = call([*PRIV, "owner-status"])[1] == "locked"
     ttk.Label(f, style="Note.TLabel", wraplength=520, text="There is no default password. Login name: victor. "
-              "SSH stays off unless you turn it on below (key-only).").grid(columnspan=2, sticky="w", pady=(0, 10))
-    v = {k: tk.StringVar() for k in ("name", "p1", "p2", "cc", "ssid", "psk")}
+              "SSH stays off unless you turn it on below (key-only).").grid(columnspan=2, sticky="w", pady=(0, 6))
+    if locked:   # the first password is set on the physical console, never from this window (audit F-13)
+        ttk.Label(f, wraplength=520, foreground=MAGENTA, text="No owner password is set yet. It can only be set on the text "
+                  "console while the Pi boots (before this desktop appears): reboot and answer the prompt there. "
+                  "You can finish the rest of the setup now.").grid(columnspan=2, sticky="w", pady=(0, 10))
+    v = {k: tk.StringVar() for k in ("name", "cc", "ssid", "psk")}
     v["cc"].set("US"); ssh_on = tk.BooleanVar(value=False)
-    rows = [("Full name (optional)", "name", None), ("Password (min 8)", "p1", "*"), ("Repeat password", "p2", "*"),
+    rows = [("Full name (optional)", "name", None),
             ("Wi-Fi country", "cc", None), ("Wi-Fi network (optional)", "ssid", None), ("Wi-Fi passphrase", "psk", "*")]
     for i, (lab, k, show) in enumerate(rows, start=2):
         ttk.Label(f, text=lab).grid(row=i, column=0, sticky="w", pady=3)
@@ -52,18 +57,13 @@ def main():
     ttk.Checkbutton(f, text="Turn SSH on now (key-only)", variable=ssh_on).grid(row=10, column=0, columnspan=2, sticky="w", pady=6)
 
     def save():
-        p1, p2, cc = v["p1"].get(), v["p2"].get(), v["cc"].get().strip().upper()
+        cc = v["cc"].get().strip().upper()
         kt = keys.get("1.0", "end").strip()
-        if p1 != p2 or len(p1) < 8:
-            return messagebox.showerror("Password", "Passwords must match and be at least 8 characters.")
         if not victorpi.valid_country(cc):
             return messagebox.showerror("Wi-Fi country", "Enter a 2-letter country code such as US.")
         if ssh_on.get() and not kt:
             return messagebox.showerror("SSH", "Turning SSH on needs at least one public key.")
         steps = []
-        rc, out = call([*PRIV, "set-password"], p1 + "\n")
-        if rc:
-            return messagebox.showerror("Password", out)
         if v["name"].get().strip():
             steps.append(call([*PIPRIV, "full-name", v["name"].get().strip()]))
         steps.append(call([*PIPRIV, "wifi-country", cc]))
@@ -75,7 +75,9 @@ def main():
                 with tempfile.NamedTemporaryFile("w", dir=os.path.expanduser("~"), delete=False) as t:
                     t.write(kt + "\n")
                 steps.append(call([*PRIV, "ssh-enable", t.name, "0.0.0.0"])); os.unlink(t.name)
-        call([*PIPRIV, "mark-done"])
+        rc, out = call([*PIPRIV, "mark-done"])      # refused while the owner has no password: this window comes back
+        if rc:
+            steps.append((rc, out))
         msg = "\n".join(o for _, o in steps if o) or "Done."
         bad = [o for rc, o in steps if rc]
         (messagebox.showwarning if bad else messagebox.showinfo)("Setup", msg)

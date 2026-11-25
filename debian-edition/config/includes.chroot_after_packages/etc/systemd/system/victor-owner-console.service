@@ -1,14 +1,15 @@
 [Unit]
-Description=VictorLinux: owner decisions on the physical console (approve a data drive's saved credentials)
-# Runs as root on tty1 before any graphical login, so only the person at the machine can answer. Does nothing (and
-# returns at once) when the data drive offers nothing to approve.
+Description=VictorLinux: owner password and data-drive approval on the physical console
+# Runs as root on tty1 before any graphical login, so only the person at the machine can answer (audit F-10, F-13).
+# Returns at once when the owner has a password and the data drive offers nothing to approve. Waits at most 120 s
+# for an answer (an unattended boot continues; nothing is changed).
 After=victor-storage.service victor-access.service
 Before=getty@tty1.service display-manager.service victor-pi-setup-tty.service
 Conflicts=getty@tty1.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/lib/victorlinux/victor-owner-setup console
+ExecStart=/usr/local/lib/victorlinux/victor-owner-setup console --timeout 120
 ExecStopPost=/bin/systemctl --no-block start getty@tty1.service
 StandardInput=tty
 StandardOutput=tty
