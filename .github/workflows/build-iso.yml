@@ -1,7 +1,11 @@
 name: Build ISO
 
-# Builds on infrastructure YOU control: GitHub-hosted runners by default, or any runner label you pass in.
+# Arch edition (archiso at the repo root). Builds on GitHub-hosted runners by default, or any runner label you pass in.
 # No secrets are needed. Build-time internet access is required; the resulting ISO runs offline.
+#
+# Cost: one amd/gui build compiles llama.cpp inside the image chroot (roughly an hour or more on a hosted runner),
+# plus ~15-30 min for the QEMU boot test. So it runs only on PRs that touch Arch-edition files (or by hand), never on
+# unrelated PRs, and the `arch-iso` concurrency group keeps at most one Arch build running repo-wide.
 on:
   workflow_dispatch:
     inputs:
@@ -20,22 +24,53 @@ on:
         default: ""
       runner:
         description: "Runner label (use a self-hosted label of yours for cuda/hip/packs: they need >14 GB disk)"
-        default: ubuntu-latest
+        default: ubuntu-24.04
+  pull_request:
+    paths:
+      - "airootfs/**"
+      - "efiboot/**"
+      - "syslinux/**"
+      - "packages.x86_64.jinja2"
+      - "pacman.conf.jinja2"
+      - "profiledef.sh.jinja2"
+      - "bootstrap_packages.x86_64"
+      - ".ci/**"
+      - "fleet/**"
+      - "scripts/build-inner.sh"
+      - "scripts/prepare-sources.sh"
+      - "scripts/sccache-stage.sh"
+      - "tests/arch_vm_test.py"
+      - "debian-edition/tests/vm_test.py"
+      - ".github/workflows/build-iso.yml"
+
+concurrency:
+  group: arch-iso
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
+env:
+  PLATFORM: ${{ inputs.platform || 'amd' }}
+  TYPE: ${{ inputs.type || 'gui' }}
+
 jobs:
   build:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    timeout-minutes: 330
     container:
       image: archlinux:latest
       options: --privileged
+      volumes:
+        - /mnt:/mnt
     steps:
       - name: Install git
         run: pacman -Syu --noconfirm git
 
       - uses: actions/checkout@v4
+
+      - name: Disk space
+        run: df -h / /mnt
 
       - name: Fetch pinned sources
         run: |
@@ -44,22 +79,69 @@ jobs:
 
       - name: Build ISO
         env:
-          WORKDIR: /var/tmp/victor-work
+          WORKDIR: /mnt/victor-work
+          OUTDIR: /mnt/victor-out
         run: |
-          args="${{ inputs.platform }} ${{ inputs.type }}"
+          mkdir -p /mnt/pacman-cache && rm -rf /var/cache/pacman/pkg && ln -s /mnt/pacman-cache /var/cache/pacman/pkg
+          start=$(date +%s)
+          args="$PLATFORM $TYPE"
           if [ -n "${{ inputs.packs }}" ]; then args="$args --packs ${{ inputs.packs }}"; fi
           scripts/build-inner.sh $args
+          echo "BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
 
       - name: Summary
         run: |
-          { echo '```'; (cd out && sha256sum ./*.iso); echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cd /mnt/victor-out
+          { echo "Build time: $((BUILD_SECONDS / 60)) min"; echo '```'; ls -l ./*.iso; sha256sum ./*.iso; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: victorlinux-${{ inputs.platform }}-${{ inputs.type }}
+          name: victorlinux-${{ env.PLATFORM }}-${{ env.TYPE }}
           path: |
-            out/*.iso
-            out/*.sha256
-            out/manifest-*.json
-            out/packages-*.txt
-            out/build-*.log
+            /mnt/victor-out/*.iso
+            /mnt/victor-out/*.sha256
+            /mnt/victor-out/manifest-*.json
+            /mnt/victor-out/packages-*.txt
+            /mnt/victor-out/build-*.log
+          retention-days: 14
+          if-no-files-found: error
+
+  boot-test:
+    # Boots the ISO the `build` job just made, under QEMU, and fails on a real defect. This is a VM boot,
+    # NOT a real-hardware boot: it does not cover Secure Boot, physical drives, GPUs or the owner's firmware.
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: victorlinux-${{ env.PLATFORM }}-${{ env.TYPE }}
+          path: out/arch
+      - name: Verify the downloaded ISO against its checksum
+        run: cd out/arch && sha256sum -c ./*.sha256
+      - name: Install QEMU and tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 ovmf xorriso e2fsprogs imagemagick
+      - name: Enable KVM when the runner offers it
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+          ls -l /dev/kvm || echo "no /dev/kvm: QEMU will use TCG (slow)"
+      - name: Boot smoke test (kernel/initramfs from the ISO, offline)
+        run: sudo python3 -I tests/arch_vm_test.py smoke "$(ls out/arch/*.iso | head -1)" out/boot-test
+      - name: Bootloader test (BIOS syslinux and UEFI systemd-boot from the ISO)
+        run: sudo python3 -I tests/arch_vm_test.py bootloader "$(ls out/arch/*.iso | head -1)" out/boot-test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arch-boot-test-${{ env.PLATFORM }}-${{ env.TYPE }}
+          path: |
+            out/boot-test/*.png
+            out/boot-test/*.json
+            out/boot-test/vm/*.log
+            out/boot-test/vm/*.err
+            out/boot-test/boot-menu/*.serial
+          retention-days: 14
+          if-no-files-found: warn
