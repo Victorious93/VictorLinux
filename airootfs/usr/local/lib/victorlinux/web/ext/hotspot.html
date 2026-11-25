@@ -1,0 +1,17 @@
+<section id="t-hotspot" data-tab="hotspot" data-icon="net" data-label="Hotspot">
+ <style>#hsQr .qr svg{width:220px;height:220px}#hsQr{display:flex;gap:18px;align-items:center;flex-wrap:wrap}</style>
+ <div class="hero"><div><div class="eyebrow">No router needed</div><h2>Wi-Fi hotspot. <em>Phone to PC, direct.</em></h2><p>This PC opens its own Wi-Fi network so your phone can reach the local model's API anywhere. It is isolated: no internet is shared and joined devices reach only the API, still with an API key. This admin page stays on this PC only.</p></div><span class="hero-badge" id="hsBadge">● Off</span></div>
+ <div id="hsWarn"></div>
+ <div class="card"><h2><svg><use href="#i-net"/></svg>Network</h2>
+  <div class="row"><div><label for="hsSsid">Network name</label><input id="hsSsid" maxlength="32" placeholder="VictorLinux-…"></div>
+   <div><label for="hsPsk">Password (8–63)</label><input id="hsPsk" type="password" autocomplete="new-password" placeholder="leave empty to keep"></div>
+   <div><label for="hsBand">Band</label><select id="hsBand"><option value="2.4">2.4 GHz (works everywhere)</option><option value="5">5 GHz (faster)</option></select></div>
+   <div><label for="hsCh">Channel</label><select id="hsCh"></select></div>
+   <div><label for="hsCc">Country</label><input id="hsCc" size="3" maxlength="2" placeholder="US"></div>
+   <div><label for="hsIf">Wi-Fi adapter</label><select id="hsIf"></select></div></div>
+  <div class="row"><button class="b s" id="hsSave">Save</button><button class="b s" id="hsNew">New password</button><button class="b" id="hsStart">Start hotspot</button><button class="b d" id="hsStop">Stop</button></div>
+  <p class="mut" id="hsInfo"></p></div>
+ <div class="card" id="hsJoin" hidden><h2><svg><use href="#i-api"/></svg>Join from your phone</h2>
+  <div id="hsQr"></div><p class="mut">Scan with the phone camera to join, then use the API address above with one of your API keys. The QR contains the Wi-Fi password, so hide it when you are done.</p>
+  <button class="b s" id="hsHide">Hide</button></div>
+</section>
