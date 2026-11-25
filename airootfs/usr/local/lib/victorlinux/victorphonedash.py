@@ -136,7 +136,10 @@ class PttController:
         plan = self.plan_fn()
         if plan.argv is None:
             return "Push-to-talk unavailable: " + " ".join(plan.help)
-        self.session = vp.PttSession(self.rec, phones_from_tiles(self.mgr), lambda: self.mgr.focus, self.guard)
+        phones = phones_from_tiles(self.mgr)
+        if hasattr(self.rec, "set_vocabulary"):        # closed command grammar incl. today's nicknames
+            self.rec.set_vocabulary(vp.command_vocabulary([p.nickname for p in phones]))
+        self.session = vp.PttSession(self.rec, phones, lambda: self.mgr.focus, self.guard)
         self.session.press()
         self.source_label = plan.label
         try:

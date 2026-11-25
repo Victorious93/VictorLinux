@@ -252,3 +252,18 @@ def test_headless_screens_dry_run(capsys):
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 2 and "--no-control" in lines[0] and "--no-control" not in lines[1] and "--max-fps=15" in lines[1]
     assert victorphone.main_headless(["screens", "--serials", "a,b,c,d", "--dry-run"]) == 2
+
+
+def test_command_vocabulary_includes_nicknames_and_is_pushed_on_press():
+    import victorptt as vp
+    v = vp.command_vocabulary(["Nord 5G", "Pixel"])
+    assert {"go", "back", "home", "nord", "5g", "pixel"} <= set(v)
+
+    class VocabRec(FakeRec):
+        vocab = None
+        def set_vocabulary(self, words): self.vocab = words
+    m = _mgr(); m.grant_input("a"); sent = []
+    rec = VocabRec("go back")
+    c, _ = _ptt(m, rec, sent)
+    c.press(); c.release()
+    assert "nord" in rec.vocab and "pixel" in rec.vocab

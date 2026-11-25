@@ -75,7 +75,7 @@ def open_dashboard(master: Any = None, profile: str = "normal") -> Any:
     if ready:
         try:
             import victorptt as vp
-            rec = vp.VoskRecognizer()
+            rec = vp.make_recognizer("vosk")
         except Exception as e:          # model present but unusable: say so, keep manual control
             ready, stt_msg = False, f"Speech model could not load ({e.__class__.__name__}).\n" + pd.STT_INSTALL_HELP
     ptt = pd.PttController(mgr, rec, _mic_plan, read_fn=_read_selected)
