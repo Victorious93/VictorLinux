@@ -6,6 +6,19 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 CTL = "/usr/local/bin/victor-ctl"
 
 
+MESH = "/usr/local/bin/victor-mesh"
+
+
+def mesh(*args, timeout=300, stdin=None):
+    p = subprocess.run([MESH, "--json", *args], capture_output=True, text=True, timeout=timeout, input=stdin)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}")
+    try:
+        return json.loads(p.stdout)
+    except ValueError:
+        return p.stdout.strip()
+
+
 def ctl(*args, timeout=600, stdin=None):
     p = subprocess.run([CTL, *args], capture_output=True, text=True, timeout=timeout, input=stdin)
     if p.returncode != 0:
@@ -117,7 +130,7 @@ class App(tk.Tk):
             ttk.Label(card, textvariable=sub, style="TileSub.TLabel", wraplength=140).pack(anchor="w")
             self.tiles[key] = (v, sub)
         self.nb = ttk.Notebook(self); self.nb.pack(fill="both", expand=True, padx=18, pady=12)
-        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_ssh(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_ext(); self.tab_diag()
+        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_ssh(); self.tab_mesh(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_ext(); self.tab_diag()
         self.after(500, self.refresh)
 
     def tab_ext(self):
@@ -399,6 +412,73 @@ class App(tk.Tk):
 
     def ssh_status(self):
         self.bg(lambda: ctl("ssh", "status"), self._ssh_show)
+
+    # ---- Victorious Mesh (own Headscale). Off until joined; every action is a `victor-mesh` call.
+    MESH_TOGGLES = (("exit-node", "exit_node", "Offer this PC as an exit node"),
+                    ("wol", "wol", "Wake-on-LAN (magic packet) on wired network cards"),
+                    ("taildrop", "taildrop", "Receive files sent with Taildrop"),
+                    ("ssh", "ssh", "SSH over the mesh only (key login, port 22 on tailscale0)"),
+                    ("share", "share", "Read-only file share for the app (mesh address, port 8090, password)"))
+
+    def tab_mesh(self):
+        f = ttk.Frame(self.nb, padding=8); self.nb.add(f, text="Mesh")
+        ttk.Label(f, wraplength=820, text="Join this PC to YOUR OWN Headscale server so the Victorious Mesh app on your phones can reach it. "
+                  "Nothing is preset. The pre-auth key is handed to tailscale once and never stored. This PC advertises "
+                  "tag:victorlinux (tag:victorlinux-pi on the Pi edition). See docs/victorious-mesh.md.").pack(anchor="w")
+        g = ttk.Frame(f); g.pack(fill="x", pady=6)
+        self.mesh_url, self.mesh_key, self.mesh_name = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        for i, (label, var, show) in enumerate((("Headscale URL", self.mesh_url, ""), ("Pre-auth key", self.mesh_key, "•"),
+                                                ("Device name (optional)", self.mesh_name, ""))):
+            ttk.Label(g, text=label).grid(row=i, column=0, sticky="w", padx=(0, 8))
+            ttk.Entry(g, textvariable=var, show=show, width=48).grid(row=i, column=1, sticky="w", pady=1)
+        b = ttk.Frame(f); b.pack(fill="x", pady=4)
+        for t, fn in (("Join mesh", self.mesh_join), ("Connect", lambda: self.mesh_do("up")), ("Disconnect", lambda: self.mesh_do("down")),
+                      ("Refresh", self.mesh_refresh), ("Leave mesh", self.mesh_leave)):
+            ttk.Button(b, text=t, command=fn).pack(side="left", padx=2)
+        self.mesh_vars = {}
+        for key, skey, label in self.MESH_TOGGLES:
+            v = tk.BooleanVar(value=False); self.mesh_vars[skey] = v
+            ttk.Checkbutton(f, text=label, variable=v, command=lambda k=key, var=v: self.mesh_set(k, var)).pack(anchor="w")
+        b2 = ttk.Frame(f); b2.pack(fill="x", pady=4)
+        ttk.Button(b2, text="Make a new share password", command=lambda: self.mesh_do("share", "password")).pack(side="left", padx=2)
+        ttk.Button(b2, text="Share a file…", command=self.mesh_share_add).pack(side="left", padx=2)
+        self.mesh_out = self.mkout(f)
+
+    def _mesh_show(self, r):
+        self.out(self.mesh_out, json.dumps(r, indent=2) if not isinstance(r, str) else r)
+        if isinstance(r, dict) and "toggles" in r:
+            for k, v in r["toggles"].items():
+                if k in self.mesh_vars:
+                    self.mesh_vars[k].set(bool(v))
+            if r.get("control_url") and not self.mesh_url.get():
+                self.mesh_url.set(r["control_url"])
+
+    def mesh_join(self):
+        url, key, name = self.mesh_url.get().strip(), self.mesh_key.get().strip(), self.mesh_name.get().strip()
+        if not url or not key:
+            messagebox.showerror("VictorLinux", "Enter your Headscale URL and a pre-auth key.")
+            return
+        self.mesh_key.set("")
+        args = ["join", "--url", url, "--key-stdin"] + (["--name", name] if name else [])
+        self.bg(lambda: mesh(*args, stdin=key + "\n"), self._mesh_show, "joining the mesh...")
+
+    def mesh_do(self, *args):
+        self.bg(lambda: mesh(*args), self._mesh_show)
+
+    def mesh_set(self, key, var):
+        self.bg(lambda: mesh("set", key, "on" if var.get() else "off"), self._mesh_show)
+
+    def mesh_refresh(self):
+        self.bg(lambda: mesh("status"), self._mesh_show)
+
+    def mesh_leave(self):
+        if messagebox.askyesno("Leave mesh", "Leave the mesh? This PC's mesh identity and settings are removed."):
+            self.mesh_do("leave")
+
+    def mesh_share_add(self):
+        path = filedialog.askopenfilename(title="Share a file on the mesh (read-only)")
+        if path:
+            self.bg(lambda: mesh("share", "add", path), self._mesh_show)
 
     # ---- Settings -> Audio -> Microphone (same model as `victor-mic`). UNVERIFIED: not rendered in the build sandbox.
     def tab_mic(self):
