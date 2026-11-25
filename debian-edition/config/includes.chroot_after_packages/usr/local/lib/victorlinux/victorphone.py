@@ -233,6 +233,8 @@ Usage: victor-phone-headless [options] <command> [command options]
   screencap FILE         Save a PNG screenshot with adb (no scrcpy needed)
   record FILE            Record with scrcpy, no window (needs scrcpy)
   mirror                 Start scrcpy (needs a display unless you pass --no-window)
+  screens                Up to three phones side by side, one scrcpy window each
+                         (--serials A,B,C [--profile normal|low] [--control SERIAL])
 
 Global options:
   -h, --help             Show this help
@@ -294,6 +296,11 @@ def _parse_headless(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--stay-awake", action="store_true")
     parser.add_argument("--turn-screen-off", action="store_true")
     parser.add_argument("--record", default="")
+    parser.add_argument("--serials", default="")
+    parser.add_argument("--profile", default="normal")
+    parser.add_argument("--control", default="")
+    parser.add_argument("--width", type=int, default=1800)
+    parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("command", nargs="?", default="")
     parser.add_argument("target", nargs="?", default="")
     args, unknown = parser.parse_known_args(argv)
@@ -441,6 +448,47 @@ def cmd_scrcpy(args: argparse.Namespace, *, record_file: str, no_window: bool) -
     return 1
 
 
+def cmd_screens(args: argparse.Namespace) -> int:
+    """Headless/CLI counterpart of the dashboard: separate tiled scrcpy windows, view-only except --control."""
+    import victorphonedash as pd
+    import victorscreens as vs
+    serials = [x for x in (args.serials or args.serial).split(",") if x]
+    if not serials:
+        raise HeadlessError("victor-phone-headless: screens needs --serials A[,B[,C]]", 2)
+    if len(serials) > vs.MAX_TILES:
+        raise HeadlessError("victor-phone-headless: at most three phones; choose which to show", 2)
+    if args.profile not in pd.PROFILES:
+        raise HeadlessError(f"victor-phone-headless: profile must be one of {', '.join(pd.PROFILES)}", 2)
+    mgr = vs.TileManager()
+    for s in serials:
+        t = mgr.add(s, s)
+        t.state = "live"
+        if s == args.control:
+            t.permissions = "control"
+    if args.control:
+        mgr.grant_input(args.control)
+    layout = mgr.layout(args.width, args.height)
+    cmds = []
+    for t in mgr.tiles:
+        x, y, w, h = layout[t.device_id]
+        place = [f"--window-x={x}", f"--window-y={y}", f"--window-width={w}", f"--window-height={h}"]
+        cmds.append(pd.tile_argv(t, mgr.input_held == t.device_id, args.profile, place))
+    if args.dry_run:
+        for c in cmds:
+            print(" ".join(c))
+        return 0
+    if not shutil.which("scrcpy"):
+        return _die_missing("scrcpy")
+    procs = [subprocess.Popen(c) for c in cmds]
+    try:
+        for p in procs:
+            p.wait()
+    except KeyboardInterrupt:
+        for p in procs:
+            p.terminate()
+    return 0
+
+
 def main_headless(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -467,6 +515,8 @@ def main_headless(argv: list[str] | None = None) -> int:
             return cmd_scrcpy(args, record_file=args.target, no_window=True)
         if command == "mirror":
             return cmd_scrcpy(args, record_file=args.record or args.target, no_window=args.no_window)
+        if command == "screens":
+            return cmd_screens(args)
         raise HeadlessError(f"victor-phone-headless: unknown command: {command} (try --help)", 2)
     except HeadlessError as exc:
         print(exc, file=sys.stderr)
@@ -601,7 +651,10 @@ def build_gui_argv(
 
 
 def main_gui(argv: list[str] | None = None) -> int:
-    _ = argv
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--screens" in argv:
+        import victorphonedashgui
+        return victorphonedashgui.main(argv)
     try:
         import tkinter as tk
         from tkinter import filedialog, ttk
@@ -639,6 +692,14 @@ def main_gui(argv: list[str] | None = None) -> int:
             except Exception as exc:  # never break the mirroring window over a settings dialog
                 self.set_status(f"Microphone settings unavailable: {exc}") if hasattr(self, "set_status") else None
 
+        def open_screens(self) -> None:
+            # One window with up to three live phones and push-to-talk (victorphonedashgui).
+            try:
+                import victorphonedashgui
+                victorphonedashgui.open_dashboard(self)
+            except Exception as exc:
+                self.set_status(f"Screens unavailable: {exc}") if hasattr(self, "set_status") else None
+
         def _build(self) -> None:
             header = ttk.Frame(self, padding=(22, 16, 22, 6))
             header.pack(fill="x")
@@ -659,6 +720,7 @@ def main_gui(argv: list[str] | None = None) -> int:
             ttk.Label(row, text="Devices").pack(side="left")
             ttk.Button(row, text="Refresh", command=self.refresh_devices).pack(side="right")
             ttk.Button(row, text="Microphone…", command=self.open_mic).pack(side="right", padx=(0, 6))
+            ttk.Button(row, text="Screens & talk…", command=self.open_screens).pack(side="right", padx=(0, 6))
 
             self.listbox = tk.Listbox(body, height=6, exportselection=False, activestyle="none")
             self.listbox.pack(fill="x", pady=(6, 12))

@@ -95,7 +95,7 @@ def print_features(rows):
     for d in rows:
         f = d.get("features", {})
         print(f"{d['id']}  {d['name']}  connected={d['connected']}")
-        for k in ("terminal", "shell_oneshot", "terminal_root", "messaging_sms", "messaging_email"):
+        for k in ("terminal", "shell_oneshot", "terminal_root", "messaging_sms", "messaging_email", "mic_droidcommand", "mic_keyboard"):
             x = f.get(k, {})
             print(f"    {k:16} {x.get('state','?'):28} {x.get('action') or ''}")
 
@@ -140,6 +140,21 @@ def cmd_exec(a):
     if status is None:
         print(f"no exit status was reported ({rel.state}: {rel.reason})", file=sys.stderr); return 5
     return status
+
+
+def cmd_mic(a):
+    """Hand a phone-microphone offer to a paired phone. The offer (it holds a one-time secret) is read from stdin or a
+    0600 file so it never appears in the process list or shell history, and it is never printed."""
+    if a.micmd == "list": return show(call("GET", "/mic-offers"))
+    if a.micmd == "status": return show(call("GET", f"/mic-offers/{a.offer_id}"))
+    raw = (open(a.offer_file).read() if a.offer_file else sys.stdin.readline()).strip()
+    parts = raw.split(";")
+    if parts[0] != "vmic1" or len(parts) != 10:
+        print("ERROR: expected one vmic1 offer line (from victor-mic serve)", file=sys.stderr); return 2
+    r = call("POST", "/mic-offers", {"device": a.device, "provider": parts[7], "offer": raw, "pc_name": a.pc_name or socket.gethostname(),
+                                     "expires_ms": int(parts[9]) * 1000})
+    print("Offer handed to the phone. Open the microphone screen there and tap Start; nothing starts on its own.", file=sys.stderr)
+    return show({k: r[k] for k in ("id", "device_id", "provider", "state")})
 
 
 def cmd_message(a):
@@ -195,6 +210,11 @@ def main(argv=None):
     ex = sp.add_parser("exec", help="run ONE command on a paired phone through VictorSuite and print its real output and exit status")
     ex.add_argument("device"); ex.add_argument("--privileged", action="store_true"); ex.add_argument("--shell", help="command line as one string"); ex.add_argument("argv", nargs="*", help="command and arguments (after --)")
     ts = sp.add_parser("terminals", help="list terminal sessions"); tc = sp.add_parser("terminal-close"); tc.add_argument("session")
+    mi = sp.add_parser("mic", help="hand a phone-microphone offer to a paired phone over the authenticated fleet channel")
+    misp = mi.add_subparsers(dest="micmd", required=True)
+    mo = misp.add_parser("offer"); mo.add_argument("device"); mo.add_argument("--offer-file", help="file holding the vmic1 line (default: stdin)")
+    mo.add_argument("--pc-name")
+    misp.add_parser("list"); mis = misp.add_parser("status"); mis.add_argument("offer_id")
     ms = sp.add_parser("message", help="prepare an SMS/email draft and hand it to VictorSMS on a phone for the owner to review")
     msp = ms.add_subparsers(dest="mcmd", required=True)
     for ch in ("sms", "email"):
@@ -226,6 +246,7 @@ def main(argv=None):
     elif a.cmd == "terminal": sys.exit(cmd_terminal(a))
     elif a.cmd == "exec": sys.exit(cmd_exec(a))
     elif a.cmd == "message": cmd_message(a)
+    elif a.cmd == "mic": return cmd_mic(a)
     elif a.cmd in ("pause", "resume", "enable", "disable", "revoke", "unpair"): show(call("POST", f"/devices/{a.device}/{a.cmd}"))
     elif a.cmd == "config":
         from .server import load_config, save_config

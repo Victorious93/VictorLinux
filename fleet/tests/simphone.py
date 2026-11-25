@@ -8,7 +8,9 @@ from victorfleet.protocol import envelope, terminal_binding_hash, draft_content_
 NEW_OPS = {"terminal.session": {"available": True, "granted": True, "status": "ready"},
            "shell.oneshot": {"available": True, "granted": True, "status": "ready"},
            "message.draft.sms": {"available": True, "granted": True, "status": "ready"},
-           "message.draft.email": {"available": True, "granted": True, "status": "ready"}}
+           "message.draft.email": {"available": True, "granted": True, "status": "ready"},
+           "mic.offer.droidcommand": {"available": True, "granted": True, "status": "ready"},
+           "mic.offer.keyboard": {"available": True, "granted": True, "status": "ready"}}
 
 
 class SimPhone(SimWorker):
@@ -26,6 +28,8 @@ class SimPhone(SimWorker):
         self.drafts = {}                    # draft_id -> state  (de-dup by id: a retried handoff can never submit twice)
         self.submitted = []                 # what "Send" actually submitted (should be at most once per draft)
         self.opens_seen = []
+        self.mic_offers = {}                # offer_id -> payload, MEMORY ONLY (stands in for DroidCommand's in-memory inbox)
+        self.decide_mic = "accepted"        # accepted | declined | ignore  (the owner's Start/Dismiss on the phone screen)
         self.starting = []
         self.outbound = []
         self.stop_flag = False
@@ -96,6 +100,8 @@ class SimPhone(SimWorker):
             s = self.sessions.get(p["session_id"])
             if s:
                 self._kill(s)
+        elif t == "mic_offer":
+            self._handle_mic(p)
         elif t == "draft_deliver":
             did = p["draft_id"]
             assert draft_content_hash(p["channel"], p["draft"]) == p["content_hash"]
@@ -115,6 +121,15 @@ class SimPhone(SimWorker):
             elif d == "failed":
                 self.drafts[did] = "failed"
                 self.send("draft_status", {"draft_id": did, "state": "failed", "detail": "SMTP refused", "content_hash": p["content_hash"]})
+
+    def _handle_mic(self, p):
+        oid = p["offer_id"]
+        if oid in self.mic_offers:
+            return
+        self.mic_offers[oid] = p
+        self.send("mic_status", {"offer_id": oid, "state": "received"})
+        if self.decide_mic in ("accepted", "declined"):
+            self.send("mic_status", {"offer_id": oid, "state": self.decide_mic})
 
     # ----- the "VictorSuite" side: a real pty / subprocess
     def _start_shell(self, p):

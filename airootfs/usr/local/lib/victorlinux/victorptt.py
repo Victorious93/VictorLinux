@@ -25,7 +25,10 @@ class Recognizer(Protocol):
 
 class VoskRecognizer:
     """Vosk (Apache-2.0) offline recogniser. Needs `pip install vosk` and a model directory; neither is bundled or
-    downloaded automatically. UNVERIFIED with a real model in the build sandbox (the official model host was blocked)."""
+    downloaded automatically. Host-tested with the official vosk-model-small-en-us-0.15 and synthetic speech.
+
+    set_vocabulary() restricts recognition to the command words plus the phone nicknames (a Vosk grammar). Commands
+    are a closed set, so this rejects unrelated speech and is far more accurate than open dictation."""
     def __init__(self, model_dir: str | None = None, rate: int = 16000):
         st = vv.model_status(model_dir)
         if not st["installed"]:
@@ -36,10 +39,18 @@ class VoskRecognizer:
             raise RecognizerMissing("The offline recogniser is not installed. Run: pip install vosk (nothing is downloaded automatically).") from e
         vosk.SetLogLevel(-1)
         self._vosk, self._model, self._rate = vosk, vosk.Model(st["path"]), rate
+        self._grammar: str | None = None
+        self.reset()
+
+    def set_vocabulary(self, words: list[str] | None) -> None:
+        self._grammar = json.dumps(sorted(set(words)) + ["[unk]"]) if words else None
         self.reset()
 
     def reset(self) -> None:
-        self._rec = self._vosk.KaldiRecognizer(self._model, self._rate)
+        if self._grammar:
+            self._rec = self._vosk.KaldiRecognizer(self._model, self._rate, self._grammar)
+        else:
+            self._rec = self._vosk.KaldiRecognizer(self._model, self._rate)
         self._rec.SetWords(True)
 
     def accept(self, pcm: bytes) -> None:
@@ -72,6 +83,16 @@ def _default_voice_config() -> str | None:
             return None
     except Exception:
         return None
+
+
+COMMAND_WORDS = ("go back home recent apps disconnect release the input control focus enlarge switch to show all every "
+                 "phones phone one two three first second third read selected selection pc screen text please my").split()
+
+
+def command_vocabulary(nicknames: list[str]) -> list[str]:
+    """Words the push-to-talk grammar accepts: the fixed command words plus each word of the phone nicknames."""
+    nick = [w for n in nicknames for w in vv._norm(n).split()]
+    return list(COMMAND_WORDS) + nick
 
 
 def make_recognizer(backend: str = "vosk", voice_config: str | None = None) -> Recognizer:

@@ -76,6 +76,21 @@ bad.update({
  "v11_draft_status_unknown_state": ("bad_request", env("draft_status", W, D, {"draft_id": "draft-1", "state": "sent_twice"}, "m-bad-18", proto=P11)),
  "v11_capability_status_invalid": ("bad_request", env("hello", W, D, {"app_version": "x", "capabilities": {"operations": {"terminal.session": {"available": True, "status": "mostly_ready"}}, "device_state": state}}, "m-bad-19", proto=P11)),
 })
+# ---- protocol 1.2: phone-microphone offer (the secret below is a FIXTURE value, not a real key)
+P12 = {"major": 1, "minor": 2}
+MIC_LINE = ";".join(["vmic1", "192.168.1.20", "47111", "sess-fixture", "00" * 32, "pc-fixture", W, "keyboard", "e" * 64, "1790003600"])
+ops12 = dict(ops11, **{"mic.offer.droidcommand": {"available": True, "granted": True, "status": "ready"},
+                       "mic.offer.keyboard": {"available": False, "granted": False, "status": "not_installed", "detail": "Victorious Keyboard is not installed"}})
+valid.update({
+ "hello_mic_capable": env("hello", W, D, {"app_version": "droidcommand-0.0.0-fixture", "capabilities": {"operations": ops12, "root": {"available": False, "granted": False}, "device_state": state, "max_concurrent": 2}, "running": []}, "m-hello-4", proto=P12),
+ "mic_offer_keyboard": env("mic_offer", D, W, {"offer_id": "mic-0123456789abcdef", "provider": "keyboard", "offer": MIC_LINE, "pc_name": "Studio PC", "expires_ms": 1790003600000, "read": False}, "m-mic-1", proto=P12),
+ "mic_status_accepted": env("mic_status", W, D, {"offer_id": "mic-0123456789abcdef", "state": "accepted"}, "m-mstat-1", proto=P12),
+})
+bad.update({
+ "v12_mic_offer_provider_mismatch": ("bad_request", env("mic_offer", D, W, dict(valid["mic_offer_keyboard"]["payload"], provider="droidcommand"), "m-bad-21", proto=P12)),
+ "v12_mic_offer_not_vmic1": ("bad_request", env("mic_offer", D, W, dict(valid["mic_offer_keyboard"]["payload"], offer="http://x/y"), "m-bad-22", proto=P12)),
+ "v12_mic_status_unknown_state": ("bad_request", env("mic_status", W, D, {"offer_id": "mic-1", "state": "recording"}, "m-bad-23", proto=P12)),
+})
 # An assignment whose `plan` is unusable. The assignment itself is still a valid assignment and must still run: a phone
 # IGNORES a manifest it cannot accept (see docs/FLEET.md "Plan manifest"), it never refuses the job because of it.
 def asg_with(plan, mid):
