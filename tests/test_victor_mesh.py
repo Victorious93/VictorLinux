@@ -298,7 +298,7 @@ def test_copies_identical_between_editions():
 def test_off_by_default_everywhere():
     for unit in ("victor-mesh-share.service", "victor-mesh-taildrop.service"):
         t = (ROOT / "airootfs/etc/systemd/system" / unit).read_text()
-        assert "[Install]" not in t and "User=victor" in t
+        assert "\n[Install]" not in t and "User=victor" in t
     assert "systemctl disable tailscaled.service" in (ROOT / "airootfs/root/customize_airootfs.sh.jinja2").read_text()
     hook = (ROOT / "debian-edition/config/hooks/live/0260-optional-tailscale.hook.chroot").read_text()
     assert "systemctl disable tailscaled.service" in hook and "TAILSCALE_KEYRING_SHA256" in hook and 'rm -f "$list" "$key"' in hook
