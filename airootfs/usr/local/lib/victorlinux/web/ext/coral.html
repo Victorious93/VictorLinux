@@ -1,0 +1,14 @@
+<section id="t-coral" data-tab="coral" data-icon="chip" data-label="Coral TPU">
+ <div class="hero"><div><div class="eyebrow">Edge TPU</div><h2>Coral accelerator. <em>Vision and wake words only.</em></h2><p>A Coral Edge TPU runs small vision and wake-word models you provide. It <b>cannot run chat models</b>; those stay on the GPU or CPU. Off by default; nothing is downloaded.</p></div><span class="hero-badge" id="crBadge">● Off</span></div>
+ <div id="crWarn"></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Devices</h2><div id="crDevs" class="mut">Looking…</div></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Setup</h2>
+  <p class="mut">Install the Edge TPU runtime (<code>libedgetpu</code>) and a TensorFlow Lite runtime yourself, then copy models compiled with <code>edgetpu_compiler</code> (<code>*_edgetpu.tflite</code>, labels in a matching <code>.txt</code>) into <code id="crDir">the coral folder</code>.</p>
+  <div id="crMissing"></div>
+  <div class="row"><label><input type="checkbox" id="crOn"> Coral on</label></div>
+  <div class="row"><div><label for="crVision">Vision model</label><select id="crVision"></select></div><div><label for="crWake">Wake-word model</label><select id="crWake"></select></div>
+   <div><label for="crLabel">Wake label</label><input id="crLabel" size="14"></div><div><label for="crThr">Threshold</label><input id="crThr" type="number" min="0.3" max="0.99" step="0.01" style="width:80px"></div></div>
+  <div class="row"><button class="b" id="crSave">Save</button></div></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Try vision</h2>
+  <div class="row"><input type="file" id="crImg" accept="image/*"><button class="b s" id="crTry">Classify on the TPU</button></div><div id="crOut"></div></div>
+</section>
