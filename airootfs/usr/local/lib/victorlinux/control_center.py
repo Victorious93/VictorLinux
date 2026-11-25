@@ -936,6 +936,63 @@ class App:
         st["firewall_note"] = victorinput.firewall_note(st.get("bind") or "0.0.0.0", st.get("port") or victorinput.DEFAULT_PORT)
         return st
 
+    # ------------------------------------------------------------ mesh --
+    def mesh_priv(self, args, stdin=None, timeout=240):
+        exe = os.environ.get("VICTOR_MESH_PRIV", "/usr/local/lib/victorlinux/victor-mesh-priv")
+        try:
+            r = subprocess.run(["sudo", "-n", exe] + args, input=stdin, capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return 1, str(e)
+        return r.returncode, (r.stdout if r.returncode == 0 else (r.stderr or r.stdout)).strip()
+
+    def mesh_status(self):
+        import victormesh as vm
+        p = vm.paths()
+        services = {"tailscaled": vm.unit_active("tailscaled.service"), "share": vm.unit_active("victor-mesh-share.service"),
+                    "taildrop": vm.unit_active("victor-mesh-taildrop.service")}
+        st = vm.ts_status() if services["tailscaled"] else None
+        out = vm.summarize(vm.load_settings(p), st, p, services)
+        out["edition_tag"] = vm.tag_for(vm.edition())
+        return out
+
+    def mesh_action(self, b):
+        """Join Mesh screen. The pre-auth key goes to the root helper on stdin once; it is never stored or echoed."""
+        import victormesh as vm
+        act = b.get("action")
+        if act == "status":
+            return 200, self.mesh_status()
+        if act == "join":
+            try:
+                url = vm.normalize_url(str(b.get("url", "")))
+                name = vm.valid_hostname(str(b.get("name", "")))
+                key = vm.valid_authkey(str(b.get("key", "")))
+            except vm.MeshError as e:
+                return 400, {"error": str(e)}
+            rc, out = self.mesh_priv(["join", url] + ([name] if name else []), stdin=key + "\n")
+            out = out.replace(key, "***")
+            del key
+        elif act in ("up", "down", "leave", "share-password"):
+            rc, out = self.mesh_priv([act])
+        elif act == "set":
+            t, v = str(b.get("toggle", "")), "on" if b.get("on") else "off"
+            if t not in ("exit-node", "wol", "taildrop", "share", "ssh"):
+                return 400, {"error": "unknown mesh setting"}
+            rc, out = self.mesh_priv(["set", t, v])
+        elif act == "share-remove":
+            try:
+                vm.share_remove(vm.paths()["share_dir"], str(b.get("name", "")))
+            except (vm.MeshError, OSError) as e:
+                return 400, {"error": str(e)}
+            return 200, {"ok": True}
+        else:
+            return 400, {"error": "unknown mesh action"}
+        if rc != 0:
+            return 400, {"error": out or "victor-mesh-priv failed"}
+        try:
+            return 200, json.loads(out)
+        except ValueError:
+            return 200, {"ok": True, "message": out}
+
     def input_action(self, b):
         act = b.get("action")
         root = os.environ.get("VICTOR_INPUT_DIR") or tc.data_path("input") or victorinput.default_state_dir()
@@ -1393,6 +1450,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(code, payload)
             if p == "/api/bluetooth":
                 code, payload = APP.bluetooth_action(b)
+                return self._send(code, payload)
+            if p == "/api/mesh":
+                code, payload = APP.mesh_action(b)
                 return self._send(code, payload)
             if p == "/api/ssh":
                 act = b.get("action")

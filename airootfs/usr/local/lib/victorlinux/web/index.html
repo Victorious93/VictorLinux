@@ -215,6 +215,27 @@ footer{color:var(--mut);font-size:11px;text-align:center;padding:14px 24px 28px;
   <div class="row"><button class="b s" id="bSshAdd">Add key</button><input id="sshListen" value="127.0.0.1" style="width:150px" title="Listen address">
   <button class="b" id="bSshOn">Enable</button><button class="b s" id="bSshOff">Disable</button><button class="b d" id="bSshReset">Remove all keys &amp; disable</button></div></div>
 </section>
+<section id="t-mesh">
+ <div class="card" id="meshCard"><h2><svg><use href="#i-net"/></svg>Victorious Mesh (off until you join)</h2>
+  <p class="mut">Join this PC to <b>your own Headscale</b> server so the Victorious Mesh app on your phones can reach it. Nothing is preset: type your Headscale URL and a pre-auth key. The key is handed to <code>tailscale up</code> once and is never stored. This PC advertises <code id="meshTag">tag:victorlinux</code>. The Control Center itself stays on 127.0.0.1. See <code>docs/victorious-mesh.md</code>.</p>
+  <div id="meshState" class="mut" aria-live="polite">Not joined.</div>
+  <div class="row"><div><label for="meshUrl">Headscale URL</label><input id="meshUrl" placeholder="https://headscale.example.com" autocomplete="off" style="width:280px"></div>
+   <div><label for="meshKey">Pre-auth key</label><input id="meshKey" type="password" autocomplete="off" style="width:240px"></div>
+   <div><label for="meshName">Device name (optional)</label><input id="meshName" placeholder="victorlinux" autocomplete="off" style="width:160px"></div>
+   <button class="b" id="bMeshJoin">Join mesh</button></div>
+  <div class="row"><button class="b s" id="bMeshUp">Connect</button><button class="b s" id="bMeshDown">Disconnect</button><button class="b s" id="bMeshRef">Refresh</button><button class="b d" id="bMeshLeave">Leave mesh</button></div></div>
+ <div class="card" id="meshOpts"><h2>Mesh options (each off by default)</h2>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="exit-node" data-s="exit_node"> Offer this PC as an exit node</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="wol" data-s="wol"> Wake-on-LAN (magic packet) on wired network cards</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="taildrop" data-s="taildrop"> Receive files sent with Taildrop</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="ssh" data-s="ssh"> SSH over the mesh only (key login, port 22 on tailscale0)</label></div>
+  <div class="row"><label><input type="checkbox" class="meshT" data-k="share" data-s="share"> Read-only file share for the app (mesh address, port 8090, password)</label></div>
+  <div id="meshPw"></div>
+  <div class="row"><button class="b s" id="bMeshPw">Make a new share password</button></div>
+  <p class="mut">Add files with <code>victor-mesh share add FILE</code>. The share is capped at 2 GB and nobody can upload or delete. From another device: <code>curl -u mesh:PASSWORD -O http://MESH-IP:8090/f/NAME</code>.</p>
+  <div class="table-wrap"><table id="meshFiles"></table></div></div>
+ <div class="card"><h2>Peers</h2><div class="table-wrap"><table id="meshPeers"><tr><td class="mut">Not connected.</td></tr></table></div></div>
+</section>
 <section id="t-fleet">
  <div class="card"><h2>Phone fleet</h2><p class="mut">Coordinator for up to 4 DroidCommand phones. Off until you start it; local-only until fleet networking is enabled (<code>victor-fleet config --enable-network ADDR</code>). Phones keep their own approvals; Revoke takes effect immediately.</p>
   <div class="row"><button class="b" id="fStart">Start</button><button class="b d" id="fStop">Stop</button><button class="b s" id="fRef">Refresh</button><button class="b" id="fPair">Pair phone</button></div>
@@ -247,9 +268,9 @@ async function api(p,body){try{const r=await fetch(p,{method:body===undefined?"G
 function toast(m,k){const d=document.createElement("div");d.className="banner "+(k||"ok");d.textContent=m;$("toast").appendChild(d);setTimeout(()=>d.remove(),k==="bad"?12000:5000)}
 function res(j,okm){if(j&&(j.ok===false||j.error)){toast(j.error||"failed","bad");return false}toast(okm||j.message||"Done");return true}
 const G=n=>n==null?"?":(n/2**30).toFixed(1)+" GiB";
-const tabs=[["dash","home","Dashboard"],["models","cube","Models"],["docs","doc","Documents"],["storage","disk","Storage"],["remote","net","Server & Access"],["fleet","fleet","Fleet"],["logs","log","Logs & Diagnostics"]];
+const tabs=[["dash","home","Dashboard"],["models","cube","Models"],["docs","doc","Documents"],["storage","disk","Storage"],["remote","net","Server & Access"],["mesh","net","Mesh"],["fleet","fleet","Fleet"],["logs","log","Logs & Diagnostics"]];
 $("nav").innerHTML=tabs.map(t=>`<button role="tab" id="tab-${t[0]}" aria-controls="t-${t[0]}" data-t="${t[0]}" tabindex="-1"><svg><use href="#i-${t[1]}"/></svg>${t[2]}</button>`).join("");
-function show(t){if(!tabs.some(x=>x[0]===t))t="dash";document.querySelectorAll("section").forEach(s=>{s.classList.toggle("on",s.id==="t-"+t);s.setAttribute("role","tabpanel");s.setAttribute("aria-labelledby",s.id.replace("t-","tab-"))});document.querySelectorAll("nav button").forEach(b=>{const on=b.dataset.t===t;b.classList.toggle("on",on);b.setAttribute("aria-selected",String(on));b.tabIndex=on?0:-1});sessionStorage.tab=t;if(t==="storage"){loadStorage();loadHealth();loadBackups()}if(t==="models")loadLibrary();if(t==="fleet")loadFleet();if(t==="logs")loadLog();if(t==="docs")loadDocs();if(t==="remote"){loadKeys();loadInput();loadBt()}}
+function show(t){if(!tabs.some(x=>x[0]===t))t="dash";document.querySelectorAll("section").forEach(s=>{s.classList.toggle("on",s.id==="t-"+t);s.setAttribute("role","tabpanel");s.setAttribute("aria-labelledby",s.id.replace("t-","tab-"))});document.querySelectorAll("nav button").forEach(b=>{const on=b.dataset.t===t;b.classList.toggle("on",on);b.setAttribute("aria-selected",String(on));b.tabIndex=on?0:-1});sessionStorage.tab=t;if(t==="storage"){loadStorage();loadHealth();loadBackups()}if(t==="models")loadLibrary();if(t==="fleet")loadFleet();if(t==="mesh")loadMesh();if(t==="logs")loadLog();if(t==="docs")loadDocs();if(t==="remote"){loadKeys();loadInput();loadBt()}}
 async function fleetAct(cmd,arg){const j=await api("/api/fleet/action",{cmd,arg});if(j.error){toast(j.error,"bad");return}if(cmd==="pair"){$("fOut").textContent="PAIRING (single use, expires in "+j.expires_in_s+"s)\nCoordinator: "+j.coordinator_url+"\nVerify this fingerprint matches the phone's screen BEFORE approving:\n  "+j.coordinator_fingerprint_sha256+"\nPairing secret (type it on the phone):\n  "+j.pairing_secret}else if(cmd==="review"||cmd==="report"){$("fOut").textContent=JSON.stringify(j,null,2)}else{toast(j.message||"Done")}loadFleet(cmd==="pair"||cmd==="review"||cmd==="report")}
 const FEAT=[["terminal","Terminal"],["shell_oneshot","One-shot command"],["messaging_sms","SMS drafts"],["messaging_email","Email drafts"]];
 function featRows(d){const f=d.features||{};return `<div class="mut fleet-feat" data-dev="${esc(d.id)}">`+FEAT.map(([k,n])=>{const x=f[k]||{state:"unknown"},ok=x.state==="ready";return `<span title="${esc(x.detail||"")}"><b>${n}:</b> ${ok?"ready":esc(String(x.state).replace(/_/g," "))}${ok?"":x.action?" — "+esc(x.action):""}</span>`}).join(" · ")+(((f.terminal||{}).state==="ready")?` <button class="b s" data-term="${esc(d.id)}">Open terminal</button>`:"")+((f.messaging_sms||{}).state==="ready"||(f.messaging_email||{}).state==="ready"?` <button class="b s" data-draft="${esc(d.id)}">Prepare draft…</button>`:"")+"</div>"}
@@ -262,6 +283,22 @@ async function loadFleet(keep){const s=await api("/api/fleet");if(s.error){$("fO
  $("fPlans").innerHTML=(s.plans||[]).map(p=>`<div class="row"><b>${esc(p.title)}</b> <span class="mut">${esc(p.state)} · ${esc(p.id)}</span> <button class="b s" data-c="review" data-a="${esc(p.id)}">Review</button><button class="b" data-c="approve" data-a="${esc(p.id)}">Approve</button><button class="b s" data-c="report" data-a="${esc(p.id)}">Report</button><button class="b d" data-c="cancel" data-a="${esc(p.id)}">Cancel</button></div>`).join("")||"<p class=mut>No plans.</p>"}
 document.addEventListener("click",e=>{const t=e.target.closest("button[data-term]");if(t){openTerm(t.dataset.term);return}const dr=e.target.closest("button[data-draft]");if(dr){showDraft(dr.dataset.draft);return}const b=e.target.closest("button[data-c]");if(b){if(b.dataset.c==="revoke"&&!confirm("Revoke this phone? Its credential stops working immediately."))return;fleetAct(b.dataset.c,b.dataset.a)}});
 document.addEventListener("DOMContentLoaded",()=>{for(const [id,c] of [["fStart","start"],["fStop","stop"],["fPair","pair"]])$(id).onclick=()=>fleetAct(c);$("fRef").onclick=()=>loadFleet();$("dSend").onclick=sendDraft;$("dClose").onclick=()=>{$("dCard").style.display="none"}});
+async function loadMesh(){const m=await api("/api/mesh",{action:"status"});if(m.error){$("meshState").textContent=m.error;return}
+ $("meshTag").textContent=m.tag||m.edition_tag||"tag:victorlinux";
+ const st=!m.installed?"tailscale is not installed in this image.":m.backend==="Running"?"Connected as "+(m.hostname||"?")+" · "+m.mesh_ips.join(", ")+" · "+m.control_url:m.joined?"Joined "+m.control_url+", not connected.":"Not joined.";
+ $("meshState").textContent=st+(m.joined&&!m.state_persistent?" No persistent storage: you must join again after a reboot.":"");
+ if(m.control_url&&!$("meshUrl").value)$("meshUrl").value=m.control_url;
+ document.querySelectorAll(".meshT").forEach(c=>{c.checked=!!(m.toggles||{})[c.dataset.s];c.disabled=!m.joined});
+ $("meshFiles").innerHTML=(m.share_files||[]).length?"<tr><th>Shared file</th><th>Size</th><th></th></tr>"+m.share_files.map(f=>`<tr><td>${esc(f.name)}</td><td>${(f.size/2**20).toFixed(1)} MiB</td><td><button class="b s" data-meshrm="${esc(f.name)}">Stop sharing</button></td></tr>`).join(""):'<tr><td class="mut">Nothing shared.'+(m.share_url?" Page: "+esc(m.share_url):"")+'</td></tr>';
+ $("meshPeers").innerHTML=(m.peers||[]).length?"<tr><th>Name</th><th>Address</th><th>State</th></tr>"+m.peers.map(p=>`<tr><td>${esc(p.name)}</td><td>${esc((p.ips||[])[0]||"")}</td><td>${p.online?"online":"offline"}</td></tr>`).join(""):'<tr><td class="mut">No peers.</td></tr>'}
+function meshPw(j){if(j&&j.password){$("meshPw").innerHTML=`<div class="banner warn">Share password (shown once, any user name works): <code>${esc(j.password)}</code></div>`}}
+async function meshAct(body,okm){const j=await api("/api/mesh",body);if(res(j,okm||(j.notes||[]).join(" · ")||undefined))meshPw(j);loadMesh();return j}
+$("bMeshJoin").onclick=async()=>{const j=await meshAct({action:"join",url:$("meshUrl").value,key:$("meshKey").value,name:$("meshName").value},"Joined the mesh");$("meshKey").value=""};
+$("bMeshUp").onclick=()=>meshAct({action:"up"},"Connected");$("bMeshDown").onclick=()=>meshAct({action:"down"});$("bMeshRef").onclick=()=>loadMesh();
+$("bMeshLeave").onclick=()=>{if(confirm("Leave the mesh? This PC's mesh identity and settings are removed."))meshAct({action:"leave"})};
+$("bMeshPw").onclick=()=>meshAct({action:"share-password"},"New share password made");
+document.querySelectorAll(".meshT").forEach(c=>c.onchange=()=>meshAct({action:"set",toggle:c.dataset.k,on:c.checked}));
+$("meshFiles").onclick=e=>{const b=e.target.closest("button[data-meshrm]");if(b)meshAct({action:"share-remove",name:b.dataset.meshrm},"Stopped sharing")};
 $("nav").onclick=e=>{const b=e.target.closest("button");if(b)show(b.dataset.t)};
 // Keyboard: arrows / Home / End move between tabs (WAI-ARIA tabs pattern).
 $("nav").addEventListener("keydown",e=>{const bs=[...document.querySelectorAll("#nav button")],i=bs.indexOf(document.activeElement);if(i<0)return;
