@@ -8,6 +8,7 @@ import json, os, pwd, re, shutil, subprocess, sys
 sys.path.insert(0, "/usr/local/lib/victorlinux")
 from victorlib.common import *
 from victorlib import storage, diskhealth
+import victorssh
 
 OWNER = "victor"
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
@@ -86,6 +87,7 @@ def cmd_mount(uuid):
     state, msg = storage.classify_mounted(DATA_MP, m["options"], m["free"], m["writable"])
     set_state(state, msg, uuid=uuid, device=c["path"], size=c["size"], model=c["model"], serial=c["serial"])
     open(selected_file(), "w").write(uuid)
+    restore_ssh_keys()
     print(f"{state}: {msg}")
 
 
@@ -195,6 +197,27 @@ def cmd_password():
     print("owner password set")
 
 
+LIVE_KEYS = f"/home/{OWNER}/.ssh/authorized_keys"
+SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-victor.conf"
+
+
+def saved_keys_path():
+    """authorized_keys copy on VICTORDATA (same file the Pi edition uses). None in a temporary session."""
+    if os.path.islink(ROOT_LINK) and os.path.realpath(ROOT_LINK) == os.path.realpath(DATA_MP) and os.path.ismount(DATA_MP):
+        return os.path.join(DATA_MP, "secrets", "ssh_authorized_keys")
+    return None
+
+
+def restore_ssh_keys():
+    src = saved_keys_path()
+    if not src:
+        return 0
+    try:
+        return victorssh.restore_keys(src, LIVE_KEYS, *uid_gid())
+    except OSError:
+        return 0
+
+
 def cmd_ssh_enable(keyfile, bind):
     import ipaddress
     ip = ipaddress.ip_address(bind)
@@ -203,39 +226,62 @@ def cmd_ssh_enable(keyfile, bind):
     st = os.stat(keyfile)
     if st.st_uid != uid_gid()[0]:
         die("key file must be owned by the owner account")
-    lines = []
-    for l in open(keyfile).read().splitlines():
-        l = l.strip()
-        if not l or l.startswith("#"):
-            continue
-        t = run(["ssh-keygen", "-l", "-f", "/dev/stdin"], input=l + "\n")
-        if t.returncode != 0:
-            die("not a valid public key: " + l[:40])
-        lines.append(l)
+    try:
+        lines = victorssh.valid_keys(open(keyfile).read())
+    except victorssh.SSHKeyError as e:
+        die("not a valid public key: " + str(e))
     if not lines:
         die("no public keys found; paste a line from ~/.ssh/id_ed25519.pub")
     uid, gid = uid_gid()
-    d = "/home/victor/.ssh"
+    d = os.path.dirname(LIVE_KEYS)
     os.makedirs(d, mode=0o700, exist_ok=True)
-    open(d + "/authorized_keys", "w").write("\n".join(lines) + "\n")
-    run(["chown", "-R", f"{uid}:{gid}", d]); os.chmod(d + "/authorized_keys", 0o600)
+    os.chown(d, uid, gid); os.chmod(d, 0o700)
+    victorssh.write_keys(LIVE_KEYS, lines, uid, gid)
+    saved = saved_keys_path()
+    if saved:
+        victorssh.write_keys(saved, lines, uid, gid)
     os.makedirs("/etc/ssh/sshd_config.d", exist_ok=True)
-    open("/etc/ssh/sshd_config.d/10-victor.conf", "w").write(
+    open(SSHD_DROPIN, "w").write(
         f"PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers {OWNER}\n"
-        f"ListenAddress {bind}\nAllowAgentForwarding no\nX11Forwarding no\n")
+        f"AuthenticationMethods publickey\nListenAddress {ip}\nAllowAgentForwarding no\nX11Forwarding no\n")
     run(["ssh-keygen", "-A"], check=True)
     run(["systemctl", "enable", "--now", "ssh"], check=True)
-    run(["nft", "add", "element", *NFT_TABLE, "allowed_tcp", "{ 22 }"])
-    print(f"SSH enabled on {bind}:22 (key auth only)")
+    run(["systemctl", "restart", "ssh"])
+    if not ip.is_loopback:
+        run(["nft", "add", "element", *NFT_TABLE, "allowed_tcp", "{ 22 }"])
+    print(f"SSH enabled on {ip}:22 (key auth only, {len(lines)} key(s)"
+          + (", saved on VICTORDATA" if saved else ", NOT saved: no persistent storage") + ")")
+
+
+def cmd_ssh_stop():
+    """Stop SSH and close port 22 on the LAN, but keep the keys (live and saved) for next time."""
+    run(["systemctl", "disable", "--now", "ssh", "ssh.socket"])
+    run(["nft", "delete", "element", *NFT_TABLE, "allowed_tcp", "{ 22 }"])
+    if os.path.exists(SSHD_DROPIN):
+        os.unlink(SSHD_DROPIN)
+    print("SSH stopped. Your keys are kept; Enable SSH uses them again.")
+
+
+def cmd_ssh_status():
+    import re as _re
+    listen = None
+    if os.path.exists(SSHD_DROPIN):
+        m = _re.search(r"^ListenAddress (\S+)", open(SSHD_DROPIN).read(), _re.M)
+        listen = m.group(1) if m else None
+    saved = saved_keys_path()
+    print(json.dumps({"active": run(["systemctl", "is-active", "ssh"]).stdout.strip() == "active",
+                      "authorized_keys": victorssh.count_keys(LIVE_KEYS), "listen": listen,
+                      "keys_persistent": bool(saved and os.path.exists(saved)), "storage_persistent": bool(saved)}))
 
 
 def cmd_revoke():
     run(["systemctl", "disable", "--now", "ssh", "ssh.socket"])
-    for p in ("/home/victor/.ssh/authorized_keys", "/etc/ssh/sshd_config.d/10-victor.conf"):
-        if os.path.exists(p):
+    for p in (LIVE_KEYS, SSHD_DROPIN, saved_keys_path(), "/etc/ssh/sshd_config.d/15-victor-mesh.conf"):
+        if p and os.path.exists(p):
             os.unlink(p)
     run(["nft", "flush", "set", *NFT_TABLE, "allowed_tcp"])
-    print("remote access revoked: SSH disabled, keys removed, firewall closed. "
+    run(["nft", "flush", "set", *NFT_TABLE, "mesh_tcp"])
+    print("remote access revoked: SSH disabled, keys removed (also from VICTORDATA), firewall closed. "
           "Run 'victor-ctl api rotate-key' to invalidate API clients.")
 
 
@@ -260,6 +306,9 @@ def cmd_access_apply():
         if h and h.startswith("$6$"):
             run(["usermod", "-p", h, OWNER]); run(["usermod", "-aG", "sudo", OWNER])
             print("owner credentials restored from the data partition")
+    n = restore_ssh_keys()
+    if n:
+        print(f"{n} SSH key(s) restored from the data partition (SSH itself stays off until you enable it)")
 
 
 def cmd_smart(dev):
@@ -363,7 +412,7 @@ def cmd_bt_unpair(mac):
 
 VERBS = {"storage-mount": (cmd_mount, 1), "storage-auto": (cmd_auto, 0), "storage-session": (cmd_session, 0),
          "storage-check": (cmd_check, 0), "storage-repair": (cmd_repair, 0), "fw-sync": (cmd_fw_sync, 3),
-         "set-password": (cmd_password, 0), "ssh-enable": (cmd_ssh_enable, 2), "revoke": (cmd_revoke, 0),
+         "set-password": (cmd_password, 0), "ssh-enable": (cmd_ssh_enable, 2), "ssh-stop": (cmd_ssh_stop, 0), "ssh-status": (cmd_ssh_status, 0), "revoke": (cmd_revoke, 0),
          "reset-owner": (cmd_reset_owner, 0), "owner-status": (cmd_owner_status, 0), "access-apply": (cmd_access_apply, 0), "smart": (cmd_smart, 1), "input-enable": (cmd_input_enable, 2), "input-disable": (cmd_input_disable, 0), "input-status": (cmd_input_status, 0), "bt-start": (cmd_bt_start, 0), "bt-confirm": (cmd_bt_confirm, 0), "bt-cancel": (cmd_bt_cancel, 0), "bt-status": (cmd_bt_status, 0), "bt-list": (cmd_bt_list, 0), "bt-unpair": (cmd_bt_unpair, 1),
          "hotspot-fw": (cmd_hotspot_fw, 2)}
 

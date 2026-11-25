@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import victorstorage as vs  # noqa: E402
 import diskhealth  # noqa: E402
+import victorssh  # noqa: E402
 import hotspot  # noqa: E402
 
 RUN = "/run/victor"
@@ -33,8 +34,7 @@ RO_FS = PERSIST_FS + ("exfat", "ntfs", "vfat")
 FS_TYPES = ("part", "disk", "loop", "crypt", "lvm")
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-victor.conf"
 KEYS = f"/home/{USER}/.ssh/authorized_keys"
-KEY_TYPES = ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
-             "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")
+KEY_TYPES = victorssh.KEY_TYPES
 
 
 def die(msg, code=1):
@@ -322,7 +322,8 @@ def cmd_persist_mount(a):
     link_home(root)
     write_state({"mode": "persistent", "uuid": a[0], "device": d["path"], "label": d.get("label"),
                  "fstype": d["fstype"], "data_root": root, "mount": DATA_MNT, "message": f"Persistent storage active on {d['path']} ({d.get('label') or a[0]})."})
-    print("persistent storage mounted at " + root)
+    restored = restore_ssh_keys()
+    print("persistent storage mounted at " + root + (f" ({restored} SSH key(s) restored)" if restored else ""))
 
 
 def persistence_root(mount):
@@ -389,31 +390,67 @@ def cmd_mount_ro(a):
 def cmd_ssh_status(_a):
     keys = 0
     if os.path.exists(KEYS):
-        keys = len([l for l in open(KEYS) if l.strip() and not l.startswith("#")])
+        keys = victorssh.count_keys(KEYS)
     active = run(["systemctl", "is-active", "sshd"]).stdout.strip()
     listen = None
     if os.path.exists(SSHD_DROPIN):
         m = re.search(r"^ListenAddress (\S+)", open(SSHD_DROPIN).read(), re.M)
         listen = m.group(1) if m else None
-    print(json.dumps({"active": active == "active", "authorized_keys": keys, "listen": listen}))
+    saved = persistent_keys_path()
+    print(json.dumps({"active": active == "active", "authorized_keys": keys, "listen": listen,
+                      "keys_persistent": bool(saved and os.path.exists(saved))}))
+
+
+def persistent_keys_path():
+    """Where the owner's authorized_keys is kept so it survives a reboot (only on real persistent storage)."""
+    st = vs_state()
+    if st.get("mode") == "persistent" and st.get("data_root"):
+        return os.path.join(st["data_root"], "security", "ssh_authorized_keys")
+    return None
+
+
+def vs_state():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def owner_ids():
+    pw = pwd.getpwnam(USER)
+    return pw.pw_uid, pw.pw_gid
+
+
+def save_ssh_keys():
+    dst = persistent_keys_path()
+    if dst and os.path.exists(KEYS):
+        try:
+            return victorssh.persist_keys(KEYS, dst)
+        except OSError:
+            return False
+    return False
+
+
+def restore_ssh_keys():
+    """Called after persistent storage is mounted: put the saved authorized_keys back if the live one is gone."""
+    src = persistent_keys_path()
+    if not src:
+        return 0
+    try:
+        return victorssh.restore_keys(src, KEYS, *owner_ids())
+    except OSError:
+        return 0
 
 
 def cmd_ssh_add_key(_a):
     line = sys.stdin.read().strip()
     if "\n" in line or not line:
         die("Provide exactly one public key line.")
-    if line.split()[0] not in KEY_TYPES:
-        die("Unsupported key type or key options present. Paste a plain public key (ssh-ed25519 ...).")
-    if len(line) > 4096:
-        die("Key too long.")
-    tmp = f"{RUN}/key.pub"
-    os.makedirs(RUN, exist_ok=True)
-    with open(tmp, "w") as f:
-        f.write(line + "\n")
-    r = run(["ssh-keygen", "-l", "-f", tmp])
-    os.unlink(tmp)
-    if r.returncode != 0:
-        die("That is not a valid SSH public key.")
+    try:
+        line, fp = victorssh.validate_line(line)
+    except victorssh.SSHKeyError as e:
+        die(str(e))
     pw = pwd.getpwnam(USER)
     d = os.path.dirname(KEYS)
     os.makedirs(d, exist_ok=True)
@@ -423,7 +460,8 @@ def cmd_ssh_add_key(_a):
         f.write(line + "\n")
     os.chown(KEYS, pw.pw_uid, pw.pw_gid)
     os.chmod(KEYS, 0o600)
-    print("Key added: " + r.stdout.strip())
+    saved = save_ssh_keys()
+    print("Key added: " + fp + ("" if saved else " (not saved: no persistent storage, so it is gone after a reboot)"))
 
 
 def cmd_ssh_enable(a):
@@ -435,6 +473,7 @@ def cmd_ssh_enable(a):
         die("Listen address must be an IP address.")
     if not os.path.exists(KEYS) or not open(KEYS).read().strip():
         die("Add an SSH public key first. Password logins are not supported.")
+    save_ssh_keys()
     os.makedirs(os.path.dirname(SSHD_DROPIN), exist_ok=True)
     with open(SSHD_DROPIN, "w") as f:
         f.write(f"ListenAddress {addr}\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
@@ -454,7 +493,9 @@ def cmd_ssh_disable(_a):
 
 def cmd_ssh_reset(_a):
     run(["systemctl", "stop", "sshd"])
-    for p in (SSHD_DROPIN, KEYS):
+    for p in (SSHD_DROPIN, KEYS, persistent_keys_path()):
+        if not p:
+            continue
         try:
             os.unlink(p)
         except FileNotFoundError:
