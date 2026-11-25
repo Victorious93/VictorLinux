@@ -60,6 +60,22 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.click('#fStop'); await sleep(1500); await page.click('#fRef');
   await page.waitForFunction(() => /stopped/i.test(document.getElementById('fOut').textContent));
   console.log('PASS fleet tab start/pair/stop');
+  // Mesh tab: off by default, nothing preset, bad input refused before anything privileged runs, key field cleared.
+  await page.locator('[data-t="mesh"]').click();
+  await page.waitForFunction(() => /Not joined|not installed/.test(document.getElementById('meshState').textContent));
+  assert.equal(await page.locator('#meshUrl').inputValue(), '');
+  assert.equal(await page.locator('#meshKey').getAttribute('type'), 'password');
+  assert.equal(await page.locator('.meshT:checked').count(), 0);
+  assert.equal(await page.locator('.meshT:disabled').count(), 5);
+  await page.fill('#meshUrl', 'http://headscale.example.com');
+  await page.fill('#meshKey', 'abcdefghijklmnop1234');
+  await page.click('#bMeshJoin');
+  await page.waitForFunction(() => /https/.test(document.getElementById('toast').textContent));
+  assert.equal(await page.locator('#meshKey').inputValue(), '');
+  const bad = await page.evaluate(() => api('/api/mesh', {action: 'join', url: 'https://hs.example.com', key: 'short'}));
+  assert.ok(/pre-auth key/.test(bad.error) && !/short/.test(bad.error));
+  assert.ok((await page.evaluate(() => api('/api/mesh', {action: 'set', toggle: 'rm -rf', on: true}))).error);
+  console.log('PASS mesh tab: off by default, URL/key validated, key never echoed');
   // Documents: refuse system folders, add a chosen folder, index locally, ask without a model -> cited passages only.
   await page.locator('[data-t="docs"]').click();
   await page.waitForFunction(() => /No folders yet/.test(document.getElementById('dSrc').textContent));
