@@ -211,7 +211,7 @@ footer{color:var(--mut);font-size:11px;text-align:center;padding:14px 24px 28px;
  <div class="card"><h2>USB keyboard and mouse</h2>
   <p class="mut">Victorious Keyboard can also act as a USB keyboard and mouse over a data cable (root and ConfigFS on the phone). That needs no PC software. This has not been tried on a real VictorLinux boot, so treat it as <b>Likely</b>. Details: <code>docs/phone-as-keyboard.md</code>.</p></div>
  <div class="card"><h2><svg><use href="#i-lock"/></svg>SSH (off by default)</h2><div id="sshState"></div>
-  <label>Public key (ssh-ed25519 …)</label><input id="sshKey" style="width:100%">
+  <label>Public key (ssh-ed25519 …; options like from="…" are fine)</label><input id="sshKey" style="width:100%">
   <div class="row"><button class="b s" id="bSshAdd">Add key</button><input id="sshListen" value="127.0.0.1" style="width:150px" title="Listen address">
   <button class="b" id="bSshOn">Enable</button><button class="b s" id="bSshOff">Disable</button><button class="b d" id="bSshReset">Remove all keys &amp; disable</button></div></div>
 </section>
@@ -375,7 +375,7 @@ $("bTemp").onclick=async()=>{if(confirm("Temporary session: models, chats and se
 function fillRemote(s){const r=s.settings.remote;if(!remoteDirty){$("rBind").value=r.enabled?r.bind:"0.0.0.0";$("rPort").value=r.port;$("rEn").checked=r.enabled;$("rTls").checked=r.tls;}
  $("rmState").innerHTML=r.enabled?`<div class="banner warn"><b>Remote access ON</b> – listening on ${esc(r.bind)}:${r.port}, API key required${r.tls?", HTTPS":", plain HTTP (use a VPN or enable HTTPS)"}.</div>`:`<div class="banner ok">Local only: 127.0.0.1:${r.port}. ${s.has_api_key?"An API key exists.":"No API key yet."}</div>`;
  const sc=r.tls?"https":"http";$("conn").innerHTML=`Base URL: <code>${sc}://&lt;this-pc-address&gt;:${r.port}/v1</code> · Health: <code>/victor/health</code> · Capabilities: <code>/victor/capabilities</code> · Header: <code>Authorization: Bearer &lt;key&gt;</code>`;
- const x=s.ssh;$("sshState").innerHTML=x&&!x.error?`<div class="banner ${x.active?"warn":"ok"}">SSH ${x.active?"RUNNING on "+esc(x.listen):"stopped"} · ${x.authorized_keys} authorized key(s) · key authentication only</div>`:`<span class="bad">${esc(x&&x.error)}</span>`}
+ const x=s.ssh;$("sshState").innerHTML=x&&!x.error?`<div class="banner ${x.active?"warn":"ok"}">SSH ${x.active?"RUNNING on "+esc(x.listen):"stopped"} · ${x.authorized_keys} authorized key(s)${x.keys_persistent?" (saved on storage)":""} · key authentication only</div>`:`<span class="bad">${esc(x&&x.error)}</span>`}
 $("bRem").onclick=async()=>{const en=$("rEn").checked;if(en&&!confirm("This exposes inference on "+$("rBind").value+". Only do this on networks you trust or over a VPN. Continue?"))return;if(res(await api("/api/remote",{enabled:en,bind:$("rBind").value,port:+$("rPort").value,tls:$("rTls").checked}),"Applied")){remoteDirty=false;refresh()}};
 $("bKey").onclick=async()=>{if(!confirm("Replace ALL API keys with one new key? Every existing key, including named and phone keys, stops working."))return;const j=await api("/api/remote/new-key",{});if(res(j,"Key created")){$("keyBox").innerHTML=`<div class="banner warn">New API key (shown once): <code>${esc(j.api_key)}</code></div>`;refresh()}};
 $("bRev").onclick=async()=>{if(confirm("Delete the API key and return to local-only?")&&res(await api("/api/remote/revoke",{}),"Remote access revoked")){$("keyBox").innerHTML="";remoteDirty=false;refresh()}};
