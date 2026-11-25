@@ -27,7 +27,13 @@ find /root -type f -name "*.jinja2" -print -delete
 # package list. --noscriptlet: the package's own post-install would start its stock service in the chroot; the image uses
 # victor-rustdeskv.service instead, which does not run until the owner has chosen a password.
 [ -f /root/sources/rustdeskv/rustdeskv.pkg.tar.zst ] || { echo "RustDeskV package missing: run scripts/prepare-sources.sh (or build with --no-rustdeskv)" >&2; exit 1; }
-pacman -U --noconfirm --noscriptlet --nodeps --nodeps /root/sources/rustdeskv/rustdeskv.pkg.tar.zst
+# pacman's CheckSpace cannot find a root mount point inside mkarchiso's airootfs chroot ("could not determine root mount point /"),
+# so it reports "not enough free disk space" for any package. Use a throwaway copy of pacman.conf without CheckSpace for this one
+# install only; the image's own /etc/pacman.conf is not touched.
+rd_conf=$(mktemp)
+sed '/^[[:space:]]*CheckSpace/d' /etc/pacman.conf > "$rd_conf"
+pacman --config "$rd_conf" -U --noconfirm --noscriptlet --nodeps --nodeps /root/sources/rustdeskv/rustdeskv.pkg.tar.zst
+rm -f "$rd_conf"
 [ -x /usr/bin/rustdesk ] || { echo "RustDeskV install failed: /usr/bin/rustdesk missing" >&2; exit 1; }
 systemctl disable rustdesk.service 2>/dev/null || true
 systemctl enable victor-rustdeskv-restore.service victor-rustdeskv.service

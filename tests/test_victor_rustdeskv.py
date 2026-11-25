@@ -371,7 +371,12 @@ def test_both_arch_types_include_rustdeskv_by_default(tmp_path, kind):
     assert "rustdeskv=on" in out
     assert "gst-plugin-pipewire" in read(work / "packages.x86_64")
     cust = read(work / "airootfs/root/customize_airootfs.sh")
-    assert "pacman -U --noconfirm --noscriptlet" in cust and "systemctl enable victor-rustdeskv-restore.service victor-rustdeskv.service" in cust
+    # CheckSpace fails in mkarchiso's non-mountpoint chroot: the install uses a temp config without it, keeping --noscriptlet/--nodeps
+    assert "sed '/^[[:space:]]*CheckSpace/d' /etc/pacman.conf" in cust
+    assert re.search(r'pacman --config "\$rd_conf" -U --noconfirm --noscriptlet --nodeps --nodeps /root/sources/rustdeskv/rustdeskv\.pkg\.tar\.zst', cust)
+    assert cust.index("sed '/^[[:space:]]*CheckSpace") < cust.index("pacman --config") < cust.index("rm -f \"$rd_conf\"")
+    assert "/etc/pacman.conf\n" not in cust.replace("> \"$rd_conf\"\n", "")      # image pacman.conf is never rewritten
+    assert "systemctl enable victor-rustdeskv-restore.service victor-rustdeskv.service" in cust
     assert ("rustdesk-link.desktop" in cust) == (kind == "gui")      # desktop entries only on the GUI edition
     assert subprocess.run(["bash", "-n", str(work / "airootfs/root/customize_airootfs.sh")]).returncode == 0
 
