@@ -68,8 +68,9 @@ def test_arch_helper_accepts_options_and_persists():
 
 def test_debian_helper_persists_restores_and_has_verbs():
     s = (DEB / "usr/local/lib/victorlinux/victor-priv").read_text()
-    assert '"secrets", "ssh_authorized_keys"' in s          # same file the Pi edition already uses
-    assert s.count("restore_ssh_keys()") >= 2               # access-apply at boot and after a storage mount
+    assert "ownertrust.SSH_KEYS" in s                        # same file the Pi edition uses (sealed by ownertrust, F-10)
+    assert (DEB / "usr/local/lib/victorlinux/victorlib/ownertrust.py").read_text().count('SSH_KEYS = "ssh_authorized_keys"') == 1
+    assert s.count("restore_ssh_keys(") >= 3                # definition + access-apply at boot + after a storage mount
     for verb in ('"ssh-status"', '"ssh-stop"', '"ssh-enable"', '"revoke"'):
         assert verb in s
     assert "AuthenticationMethods publickey" in s
