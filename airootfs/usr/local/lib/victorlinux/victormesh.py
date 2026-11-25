@@ -25,6 +25,11 @@ import threading
 import time
 import urllib.parse
 
+try:
+    import safefs
+except ImportError:           # Debian/Pi keep it in the victorlib package
+    from victorlib import safefs
+
 SHARE_PORT = 8090                       # same default as the app (MeshShareModels.DEFAULT_SHARE_PORT)
 MAX_SHARE_BYTES = 2 * 1024 * 1024 * 1024
 MIN_SHARE_PASSWORD = 16
@@ -168,17 +173,13 @@ def load_settings(p=None):
 
 
 def _write(path, text, mode=0o600, uid=None, gid=None):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.tmp{os.getpid()}"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.chmod(tmp, mode)
-    if uid is not None:
-        os.chown(tmp, uid, gid)
-    os.replace(tmp, path)
+    """Atomic write that never follows a symlink: the folder is walked with O_NOFOLLOW and the file replaced by rename.
+    (The folder is owned by the unprivileged user while the root helper writes into it.)"""
+    dfd = safefs.open_path(os.path.dirname(path), create=True)
+    try:
+        safefs.write_file(dfd, os.path.basename(path), text.encode(), uid=uid, gid=gid, mode=mode)
+    finally:
+        os.close(dfd)
 
 
 def save_settings(s, p=None, uid=None, gid=None):

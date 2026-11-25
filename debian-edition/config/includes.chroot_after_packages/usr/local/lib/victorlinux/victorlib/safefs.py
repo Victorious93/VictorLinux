@@ -85,3 +85,33 @@ def chown_dir(dir_fd, uid, gid, mode=None):
         os.fchown(dir_fd, uid, gid)
     if mode is not None:
         os.fchmod(dir_fd, mode)
+
+
+def open_path(path, create=False, mode=0o700):
+    """Open an absolute directory path component by component, refusing a symlink at ANY level (open_dir only checks the
+    last one). With create=True missing components are made (mkdirat, never through a link). Returns a directory fd."""
+    if not os.path.isabs(path):
+        raise UnsafePath(errno.EINVAL, f"{path} is not an absolute path")
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for part in [p for p in os.path.normpath(path).split("/") if p]:
+            try:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                try:
+                    os.mkdir(part, mode, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except OSError as e:
+                if e.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise UnsafePath(e.errno, f"{part} in {path} is a symbolic link or not a directory") from e
+                raise
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
