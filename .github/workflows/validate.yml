@@ -24,11 +24,15 @@ jobs:
           done
           python3 .ci/configure.py cuda gui --packs comfyui,sillytavern,vllm >/dev/null
           python3 .ci/configure.py amd headless >/dev/null
+          # RustDeskV toggle: the templates must also render with it left out
+          python3 .ci/configure.py amd headless --no-rustdeskv >/dev/null
+          python3 .ci/configure.py amd gui --no-rustdeskv >/dev/null
       - name: Shell scripts
         run: |
           shellcheck -S warning scripts/*.sh airootfs/usr/local/bin/victor-open airootfs/usr/local/bin/victor-tls-cert \
             airootfs/usr/local/bin/victor-bench airootfs/usr/local/bin/victor-phone airootfs/usr/local/bin/victor-secbackend \
             airootfs/usr/local/lib/victorlinux/victor-boot-setup \
+            debian-edition/config/hooks/live/0270-rustdeskv.hook.chroot \
             airootfs/root/customize_airootfs.sh airootfs/root/customize_airootfs/root-scripts/*.sh \
             airootfs/root/customize_airootfs/scripts/*.sh profiledef.sh \
             debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-phone \
@@ -37,7 +41,7 @@ jobs:
           bash -n profiledef.sh
       - name: Python
         run: |
-          python3 -m py_compile airootfs/usr/local/lib/victorlinux/*.py airootfs/usr/local/lib/victorlinux/victor-priv airootfs/usr/local/lib/victorlinux/victor-mesh-priv airootfs/usr/local/bin/victor-mesh airootfs/usr/local/bin/victor-storage airootfs/usr/local/bin/victor-check airootfs/usr/local/bin/victor-input airootfs/usr/local/bin/victor-bt-pair scripts/victor_layout.py debian-edition/config/includes.chroot_after_packages/usr/local/lib/victorlinux/victorinput.py debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-input debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-bt-pair airootfs/usr/local/bin/victor-phone-gui airootfs/usr/local/bin/victor-phone-headless airootfs/usr/local/bin/victor-mic airootfs/usr/local/bin/victor-pc debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-phone-gui debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-phone-headless debian-edition/config/includes.chroot_after_packages/usr/local/lib/victorlinux/victorphone.py
+          python3 -m py_compile airootfs/usr/local/bin/victor-rustdeskv airootfs/usr/local/lib/victorlinux/victor-rustdeskv-priv airootfs/usr/local/lib/victorlinux/*.py airootfs/usr/local/lib/victorlinux/victor-priv airootfs/usr/local/lib/victorlinux/victor-mesh-priv airootfs/usr/local/bin/victor-mesh airootfs/usr/local/bin/victor-storage airootfs/usr/local/bin/victor-check airootfs/usr/local/bin/victor-input airootfs/usr/local/bin/victor-bt-pair scripts/victor_layout.py debian-edition/config/includes.chroot_after_packages/usr/local/lib/victorlinux/victorinput.py debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-input debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-bt-pair airootfs/usr/local/bin/victor-phone-gui airootfs/usr/local/bin/victor-phone-headless airootfs/usr/local/bin/victor-mic airootfs/usr/local/bin/victor-pc debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-phone-gui debian-edition/config/includes.chroot_after_packages/usr/local/bin/victor-phone-headless debian-edition/config/includes.chroot_after_packages/usr/local/lib/victorlinux/victorphone.py
           python3 -m pytest -q tests debian-edition/tests/test_logic.py debian-edition/tests/test_layout.py
       - name: Browser regression checks
         run: |

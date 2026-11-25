@@ -14,7 +14,7 @@ def _cfg():
 
 def test_pins_exist_and_look_like_sha256():
     c = _cfg()
-    for key in ("llama_ui", "nvidia_pstated"):
+    for key in ("llama_ui", "nvidia_pstated", "rustdeskv_arch"):
         assert re.fullmatch(r"[0-9a-f]{64}", c["checksums"][key]), key
 
 

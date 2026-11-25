@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RustDeskV
+Comment=Remote desktop client and host (VictorLinux build; host stays off until you set a password)
+Exec=rustdesk
+Icon=rustdesk
+Categories=Network;RemoteAccess;
+Terminal=false
+StartupNotify=true

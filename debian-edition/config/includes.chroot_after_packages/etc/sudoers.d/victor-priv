@@ -3,4 +3,6 @@
 victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-priv
 # Victorious Mesh root half: fixed verbs only (join/up/down/leave/set/share-password/apply).
 victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-mesh-priv
+# RustDeskV host: fixed verbs only (setup/disable/reset/status); the password is read from stdin.
+victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-rustdeskv-priv
 Defaults:victor !requiretty

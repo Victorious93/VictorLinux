@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the *.jinja2 build templates for a chosen profile.
 
-usage: .ci/configure.py PLATFORM TYPE [--packs a,b,c]
+usage: .ci/configure.py PLATFORM TYPE [--packs a,b,c] [--no-rustdeskv]
 
   PLATFORM  amd    AMD GPUs: llama.cpp Vulkan (default path) + CPU fallback
             cuda   NVIDIA GPUs: llama.cpp CUDA + Vulkan + CPU
@@ -11,6 +11,7 @@ usage: .ci/configure.py PLATFORM TYPE [--packs a,b,c]
             empty                     drivers/OS only: no llama.cpp, no packs (as upstream "empty")
   PACKS     optional extras, all off by default (lean image):
             hip comfyui automatic invokeai sillytavern vllm(cuda only)
+  RUSTDESKV built into every non-empty image (headless and gui); `--no-rustdeskv` or VICTOR_RUSTDESKV=0 leaves it out
 
 Modified by Victorious / Victorious Framework from upstream ToriLinux (sasha0552, MIT).
 """
@@ -38,9 +39,13 @@ def render_template(filepath, **options):
     file.write(rendered)
 
 
+def rustdeskv_wanted(argv):
+  return "--no-rustdeskv" not in argv and os.environ.get("VICTOR_RUSTDESKV", "1") != "0"
+
+
 def parse(argv):
   args, packs = [], []
-  it = iter(argv)
+  it = iter(a for a in argv if a != "--no-rustdeskv")
   for a in it:
     if a == "--packs":
       packs = [p for p in next(it, "").split(",") if p]
@@ -75,6 +80,7 @@ def parse(argv):
 
 def main():
   platform, type_, packs = parse(sys.argv[1:])
+  rustdeskv = rustdeskv_wanted(sys.argv[1:]) and type_ != "empty"
   config = configparser.ConfigParser()
   config.read(".ci/options.ini")
   options = {s: dict(config.items(s)) for s in ("repositories", "revisions", "files", "build")}
@@ -89,10 +95,10 @@ def main():
   for filepath in sorted(glob.glob("**/*.jinja2", recursive=True)) + [".gitignore.jinja2"]:
     rendered.sort()
     render_template(filepath, platform=platform, type=type_, packs=packs, rendered=rendered,
-                    gh_release=gh_release, sccache=(os.environ.get("VICTOR_SCCACHE") == "1"), **options)
+                    gh_release=gh_release, rustdeskv=rustdeskv, sccache=(os.environ.get("VICTOR_SCCACHE") == "1"), **options)
     rendered.append(filepath[:-7].replace("\\", "/"))
     print(f"File '{filepath}' rendered successfully")
-  print(f"PROFILE platform={platform} type={type_} packs={','.join(packs) or '-'}")
+  print(f"PROFILE platform={platform} type={type_} packs={','.join(packs) or '-'} rustdeskv={'on' if rustdeskv else 'off'}")
 
 
 if __name__ == "__main__":

@@ -13,6 +13,18 @@
       </action>
     </item>
 
+    <item label="RustDeskV">
+      <action name="Execute">
+        <execute>rustdesk</execute>
+      </action>
+    </item>
+
+    <item label="RustDeskV host setup">
+      <action name="Execute">
+        <execute>konsole -e victor-rustdeskv setup</execute>
+      </action>
+    </item>
+
     <separator/>
 
     <menu id="games-menu" label="Games">

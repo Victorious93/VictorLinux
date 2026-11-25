@@ -1,0 +1,61 @@
+#!/bin/bash
+# RustDeskV built into the Debian edition (GUI: full client plus the host service). Installed from a pinned, checksummed .deb at BUILD
+# time; nothing is downloaded at boot. Default ON. Leave it out with VICTOR_RUSTDESKV=0 (build.sh writes RUSTDESKV=0 into versions.env),
+# and the image still builds. When it is ON, any failure stops the build instead of quietly producing an image without it.
+#
+# The host does not run until the owner chooses a password (victor-rustdeskv setup): victor-rustdeskv.service is enabled but has a
+# ConditionPathExists on a marker that only a successful setup creates. The package's stock rustdesk.service is removed.
+set -Eeuo pipefail
+
+log() { echo "rustdeskv: $*" >&2; }
+
+if [ -f /usr/share/victorlinux/versions.env ]; then
+  # shellcheck source=/dev/null
+  . /usr/share/victorlinux/versions.env
+fi
+
+remove_wiring() {
+  rm -f /usr/local/bin/victor-rustdeskv /usr/local/lib/victorlinux/victor-rustdeskv-priv /usr/local/lib/victorlinux/victorrustdeskv.py \
+        /usr/share/applications/victor-rustdeskv.desktop /usr/share/applications/victor-rustdeskv-setup.desktop \
+        /etc/systemd/system/victor-rustdeskv.service /etc/systemd/system/victor-rustdeskv-restore.service \
+        /etc/victorlinux/rustdeskv-relay.conf
+  if [ -f /etc/sudoers.d/victor-priv ]; then
+    sed -i '/victor-rustdeskv-priv/d; /^# RustDeskV host:/d' /etc/sudoers.d/victor-priv
+  fi
+}
+
+if [ "${RUSTDESKV:-1}" = "0" ]; then
+  log "turned off for this build; leaving RustDeskV out"
+  remove_wiring
+  exit 0
+fi
+
+: "${RUSTDESKV_REPO:?}" "${RUSTDESKV_VERSION:?}" "${RUSTDESKV_DEB_SHA256:?}"
+export DEBIAN_FRONTEND=noninteractive
+deb="/tmp/rustdeskv.deb"
+shim="/usr/local/sbin/systemctl"
+cleanup() { rm -f "$deb" "$shim"; }
+trap cleanup EXIT
+
+url="$RUSTDESKV_REPO/releases/download/$RUSTDESKV_VERSION/rustdesk-$RUSTDESKV_VERSION-x86_64.deb"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$deb" "$url" || { log "download failed ($url). Build with VICTOR_RUSTDESKV=0 to leave it out."; exit 1; }
+got="$(sha256sum "$deb" | cut -d' ' -f1)"
+if [ "$got" != "$RUSTDESKV_DEB_SHA256" ]; then
+  log "checksum mismatch: got $got, pinned $RUSTDESKV_DEB_SHA256. Refusing to install."
+  exit 1
+fi
+chmod 0644 "$deb"
+
+# The package's postinst runs `systemctl enable/start` for its own unit. Neither is wanted in a chroot, and the image uses
+# victor-rustdeskv.service instead, so systemctl is a no-op for the duration of this install only.
+printf '#!/bin/sh\nexit 0\n' > "$shim"
+chmod 0755 "$shim"
+apt-get install -y --no-install-recommends "$deb" libayatana-appindicator3-1
+rm -f "$shim"
+
+[ -x /usr/bin/rustdesk ] || { log "install failed: /usr/bin/rustdesk missing"; exit 1; }
+rm -f /usr/lib/systemd/system/rustdesk.service /etc/systemd/system/rustdesk.service
+systemctl enable victor-rustdeskv-restore.service victor-rustdeskv.service
+# per-device ID and keys must not exist in the image
+rm -rf /root/.config/rustdesk
+log "installed $(dpkg-query -W -f='${Version}' rustdesk 2>/dev/null)"
