@@ -180,7 +180,9 @@ def full(iso, model, out):
         rec("light theme request is rejected", "always uses dark" in o, o)
         # ---- first run: owner password (offline)
         rc, o = vm.sh("runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv owner-status"); rec("first-run needed (owner-status=locked)", o.strip().endswith("locked"), o)
-        rc, o = vm.sh("printf 'correct horse 42\\n' | runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password"); rec("first-run sets the OWNER's password", rc == 0, o)
+        rc, o = vm.sh("printf 'correct horse 42\\n' | runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password 2>&1"); rec("a process running as victor CANNOT set the first password", rc != 0 and "console" in o.lower(), o)
+        rc, o = vm.sh("passwd -S victor | awk '{print $2}'; id -nG victor"); rec("account is still locked and victor is not in sudo after the attack", o.split()[0] == "L" and "sudo" not in o.split()[1:], o)
+        rc, o = vm.sh("printf 'correct horse 42\\ncorrect horse 42\\n' | /usr/local/lib/victorlinux/victor-owner-setup console 2>&1"); rec("first-run: the console flow sets the OWNER's password", rc == 0, o)
         rc, o = vm.sh("printf 'x\\nnewpass1234\\n' | runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password 2>&1"); rec("password change without the current password is refused", rc != 0 and "wrong" in o, o)
         rc, o = vm.sh("passwd -S victor; test -f /run/victor/data/secrets/owner.shadow && stat -c %a /run/victor/data/secrets/owner.shadow"); rec("password hash persisted on data partition (0600)", " P " in o and "600" in o, o)
         # ---- inference lifecycle
