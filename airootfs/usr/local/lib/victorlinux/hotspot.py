@@ -102,11 +102,12 @@ def dnsmasq_conf(iface):
 
 
 def nmcli_commands(iface, c, con="victor-hotspot"):
-    """NetworkManager (Debian): an AP connection with NM's built-in DHCP. Forwarding is blocked by the firewall."""
+    """NetworkManager (Debian): an AP connection with NM's built-in DHCP. Forwarding is blocked by the firewall and joined
+    devices cannot talk to each other (ap-isolation, the NM counterpart of hostapd's ap_isolate=1; NetworkManager >= 1.28)."""
     band = "bg" if c["band"] == "2.4" else "a"
     return [["nmcli", "connection", "delete", con],
             ["nmcli", "connection", "add", "type", "wifi", "ifname", iface, "con-name", con, "autoconnect", "no", "ssid", c["ssid"],
-             "802-11-wireless.mode", "ap", "802-11-wireless.band", band, "802-11-wireless.channel", str(c["channel"]),
+             "802-11-wireless.mode", "ap", "802-11-wireless.ap-isolation", "yes", "802-11-wireless.band", band, "802-11-wireless.channel", str(c["channel"]),
              "802-11-wireless-security.key-mgmt", "wpa-psk", "802-11-wireless-security.proto", "rsn",
              "802-11-wireless-security.pairwise", "ccmp", "802-11-wireless-security.psk", c["psk"],
              "ipv4.method", "shared", "ipv4.addresses", f"{ADDR}/{PREFIX}", "ipv6.method", "disabled"],

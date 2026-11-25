@@ -40,6 +40,8 @@ def test_generated_configs_are_isolated_and_injection_safe():
     d = hotspot.dnsmasq_conf("wlan0")
     assert "port=0" in d and "dhcp-option=3" in d and "dhcp-option=6" in d          # DHCP only: no DNS, no default route
     nm = hotspot.nmcli_commands("wlan0", c)
+    add = nm[1]
+    assert add[add.index("802-11-wireless.ap-isolation") + 1] == "yes"             # clients cannot reach each other (hostapd: ap_isolate=1)
     assert "autoconnect" in nm[1] and nm[1][nm[1].index("autoconnect") + 1] == "no"  # never comes back by itself
     with pytest.raises(hotspot.HotspotError):
         hotspot.hostapd_conf("wlan0", dict(c, psk="abcdefgh\ninterface=eth0"))
