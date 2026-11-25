@@ -214,6 +214,14 @@ Implementation directory `/usr/local/lib/victorlinux`; account `victor`; cache `
 Public gateway routes are `/victor/health` and `/victor/capabilities`; the `/tori/` routes remain compatibility aliases. Existing data (`TORIDATA`, `tori/`) is reused without relabelling or moving it.
 Some build metadata still names the former repository URL; this repository is [Victorious93/VictorLinux](https://github.com/Victorious93/VictorLinux).
 
+## Victorious fleet
+
+VictorLinux is part of the [Victorious Framework](https://victorious-framework.pages.dev), a family of Android and PC tools by Don Victor. **It works standalone; fleet integrations are optional.** Related: [droidcommand-AI](https://github.com/Victorious93/droidcommand-AI), [victorious-flash](https://github.com/Victorious93/victorious-flash), [VictorSuite](https://github.com/Victorious93/VictorSuite), [Victorious-Keyboard](https://github.com/Victorious93/Victorious-Keyboard). The roster is in [victorious-fleet](https://github.com/Victorious93/victorious-fleet) and live status is in [fleet-manifest](https://github.com/Victorious93/fleet-manifest).
+
+## Contributing
+
+Issues and pull requests are welcome. Please describe what you changed and why, and keep documentation accurate to the code — do not invent features, builds, or test results.
+
 ## License
 
 MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Those files are unchanged by this README polish.
