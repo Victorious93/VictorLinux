@@ -289,7 +289,12 @@ def test_serve_end_to_end_records_what_the_phone_sent(tmp_path):
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
     offer = p.stdout.readline().strip().split(";")
     assert offer[0] == "vmic1" and offer[5] == "desk"
-    time.sleep(0.8)
+    for _ in range(100):                      # wait until the server really listens (a fixed sleep flaked on slow CI runners)
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=1).close()
+            break
+        except OSError:
+            time.sleep(0.1)
     ses = vm.PhoneSession(offer[3], offer[6], "Nord", offer[7], offer[5], bytes.fromhex(offer[4]))
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
     s = ctx.wrap_socket(socket.create_connection(("127.0.0.1", port), timeout=5))

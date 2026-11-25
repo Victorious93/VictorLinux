@@ -204,3 +204,10 @@ def test_control_center_non_ascii_token_gets_401_not_a_dropped_connection(tmp_pa
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_victormic_handshake_is_not_done_in_the_accept_loop():
+    src = (ROOT / "airootfs/usr/local/lib/victorlinux/victormic.py").read_text()
+    loop = src[src.index("conn, _ = ls.accept()"):]
+    assert "def serve_tls" in loop and loop.index("def serve_tls") < loop.index("ctx.wrap_socket(conn, server_side=True)")
+    assert "threading.Thread(target=serve_tls" in loop

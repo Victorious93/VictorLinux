@@ -741,12 +741,17 @@ def serve(args: argparse.Namespace) -> int:
                 write_status(reg)
                 continue
             conn.settimeout(IDLE_TIMEOUT_S)
-            try:
-                tc = ctx.wrap_socket(conn, server_side=True)
-            except (ssl.SSLError, OSError):
-                conn.close()
-                continue
-            threading.Thread(target=rx.serve, args=(tc,), daemon=True).start()
+
+            def serve_tls(conn=conn):
+                # the handshake runs in this connection's own thread: a client that connects and says nothing must not
+                # hold up the accept loop (and so every other phone) until the timeout
+                try:
+                    tc = ctx.wrap_socket(conn, server_side=True)
+                except (ssl.SSLError, OSError):
+                    conn.close()
+                    return
+                rx.serve(tc)
+            threading.Thread(target=serve_tls, daemon=True).start()
     except KeyboardInterrupt:
         pass
     finally:
