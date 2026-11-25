@@ -38,6 +38,8 @@ for ((i=1; i<=MAX_TRIES; i++)); do
     status=0; break
   fi
   echo "Build attempt $i/$MAX_TRIES failed" | tee -a "$log"
+  # archive.archlinux.org throttles bursts (esp. CI runner IPs); back off before retrying
+  if [ "$i" -lt "$MAX_TRIES" ]; then sleep $((i * ${RETRY_BACKOFF:-60})); fi
 done
 [ "$status" -eq 0 ] || { echo "BUILD FAILED after $MAX_TRIES attempts; see $log" >&2; exit 1; }
 # harvest the compiler cache from the work dir BEFORE it is deleted (only reached on success: the work dir is wiped on every retry)
