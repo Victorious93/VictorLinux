@@ -82,6 +82,8 @@ def priv(monkeypatch, tmp_path):
     loader.exec_module(m)
     monkeypatch.setattr(m.pwd, "getpwnam", lambda n: types.SimpleNamespace(pw_uid=UID, pw_gid=GID))
     monkeypatch.setattr(m, "RUN", str(tmp_path / "run"))
+    monkeypatch.setattr(m.victorssh, "keygen_ok", lambda line, keygen=None: "256 SHA256:test phone (ED25519)")
+    monkeypatch.setattr(m, "persistent_keys_path", lambda: None)
     monkeypatch.setattr(m, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "256 SHA256:test phone (ED25519)\n", ""))
     return m
 
@@ -160,8 +162,38 @@ def test_ensure_tree_creates_the_folders_on_a_clean_drive(priv, tmp_path):
     assert oct(os.stat(root / "config").st_mode & 0o777) == "0o700"
 
 
-def test_debian_and_pi_helpers_write_keys_only_through_safefs():
-    for path in (os.path.join(DEB_LIB, "victor-priv"), PI_PRIV):
-        src = open(path).read()
-        assert "safefs.write_file(dfd, \"authorized_keys\"" in src, path
-        assert "open(d + \"/authorized_keys\"" not in src and "chown\", \"-R\", f\"{uid}:{gid}\", d" not in src, path
+def test_victorssh_write_keys_never_follows_links(tmp_path):
+    import victorssh
+    victim = tmp_path / "victim"
+    victim.write_text("precious")
+    d = tmp_path / "ssh"
+    d.mkdir()
+    os.symlink(victim, d / "authorized_keys")
+    os.symlink(victim, d / f".authorized_keys.{os.getpid()}.tmp")
+    victorssh.write_keys(str(d / "authorized_keys"), [KEY], UID, GID, dir_mode=0o700)
+    assert victim.read_text() == "precious" and (d / "authorized_keys").read_text() == KEY + "\n"
+    # a symlinked folder is refused outright
+    os.symlink(d, tmp_path / "linked")
+    with pytest.raises(OSError):
+        victorssh.write_keys(str(tmp_path / "linked" / "authorized_keys"), [KEY], UID, GID)
+
+
+def test_victorssh_readers_do_not_read_through_links(tmp_path):
+    import victorssh
+    secret = tmp_path / "shadow"
+    secret.write_text("a\nb\nc\n")
+    d = tmp_path / "ssh"
+    d.mkdir()
+    os.symlink(secret, d / "authorized_keys")
+    assert victorssh.read_text(str(d / "authorized_keys")) == "" and victorssh.count_keys(str(d / "authorized_keys")) == 0
+
+
+def test_debian_victorssh_matches_arch_copy():
+    assert open(os.path.join(ARCH_LIB, "victorssh.py")).read() == open(os.path.join(DEB_LIB, "victorssh.py")).read()
+
+
+def test_debian_and_pi_helpers_write_keys_only_through_safe_writers():
+    deb = open(os.path.join(DEB_LIB, "victor-priv")).read()
+    assert "victorssh.write_keys(LIVE_KEYS, lines, uid, gid, dir_mode=0o700)" in deb and "open(d + \"/authorized_keys\"" not in deb
+    pi = open(PI_PRIV).read()
+    assert "safefs.write_file(dfd, \"authorized_keys\"" in pi and "chown\", \"-R\"" not in pi

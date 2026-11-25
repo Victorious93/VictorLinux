@@ -18,10 +18,7 @@ def open_dir(path, uid=None, create=False, mode=0o700):
     """Open `path` as a directory without following a symlink at the last component. Returns a directory fd.
     When `uid` is given the directory must belong to that uid (or be created here)."""
     if create:
-        try:
-            os.mkdir(path, mode)
-        except FileExistsError:
-            pass
+        os.makedirs(path, mode, exist_ok=True)       # parents are trusted; the final component is re-opened with O_NOFOLLOW
     try:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError as e:
