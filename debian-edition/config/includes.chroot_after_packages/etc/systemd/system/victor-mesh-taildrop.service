@@ -1,0 +1,17 @@
+[Unit]
+Description=Victorious Mesh Taildrop receive (saves files sent to this PC; off by default)
+Documentation=https://github.com/Victorious93/VictorLinux/blob/main/docs/victorious-mesh.md
+After=tailscaled.service
+Requires=tailscaled.service
+# Started and stopped only by victor-mesh-priv. No [Install] section.
+
+[Service]
+Type=simple
+User=victor
+Group=victor
+EnvironmentFile=/etc/default/victor-mesh
+ExecStart=/usr/bin/env tailscale file get --loop --conflict=rename ${VICTOR_MESH_RECEIVED}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes

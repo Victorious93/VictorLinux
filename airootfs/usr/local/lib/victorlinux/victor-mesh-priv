@@ -17,6 +17,7 @@ import victormesh as vm  # noqa: E402
 TS_UNIT = "tailscaled.service"
 SHARE_UNIT = "victor-mesh-share.service"
 TAILDROP_UNIT = "victor-mesh-taildrop.service"
+ENV_FILE = "/etc/default/victor-mesh"
 
 
 def die(msg, code=2):
@@ -110,17 +111,19 @@ def apply_extras(settings, p):
         for nic in wired_nics():
             r = run(["ethtool", "-s", nic, "wol", "g"], timeout=10)
             notes.append(f"Wake-on-LAN {'on' if r.returncode == 0 else 'not supported'} for {nic}")
+    with open(ENV_FILE, "w") as f:
+        f.write(f"VICTOR_MESH_BIND={ip4 or ''}\nVICTOR_MESH_DIR={p['dir']}\nVICTOR_MESH_RECEIVED={p['received']}\n")
     if settings["taildrop"]:
         run(["systemctl", "start", TAILDROP_UNIT])
     else:
         run(["systemctl", "stop", TAILDROP_UNIT])
     if settings["share"] and ip4:
         if not os.path.exists(p["share_auth"]):
-            notes.append("Share password created: run `victor-mesh share password` to see a new one.")
+            new_share_password(p)
+            notes.append("A share password was made; run `victor-mesh share password` to get one you can see.")
         fw(vm.SHARE_PORT, True)
-        with open("/etc/default/victor-mesh-share", "w") as f:
-            f.write(f"VICTOR_MESH_BIND={ip4}\nVICTOR_MESH_DIR={p['dir']}\n")
         run(["systemctl", "restart", SHARE_UNIT])
+        notes.append(f"Share on http://{ip4}:{vm.SHARE_PORT}/ (mesh only, read-only)")
     else:
         run(["systemctl", "stop", SHARE_UNIT])
         fw(vm.SHARE_PORT, False)
@@ -228,7 +231,7 @@ def cmd_leave(_a):
     if vm.load_settings(p)["control_url"] and run(["systemctl", "is-active", TS_UNIT], timeout=10).stdout.strip() == "active":
         run(["tailscale", "logout"], timeout=30)
     run(["systemctl", "stop", TS_UNIT])
-    for f in (p["state"], p["settings"], p["share_auth"], os.path.join(vm.TS_DROPIN_DIR, "victor.conf"), "/etc/default/victor-mesh-share"):
+    for f in (p["state"], p["settings"], p["share_auth"], os.path.join(vm.TS_DROPIN_DIR, "victor.conf"), ENV_FILE):
         if os.path.exists(f):
             os.unlink(f)
     run(["systemctl", "daemon-reload"])
