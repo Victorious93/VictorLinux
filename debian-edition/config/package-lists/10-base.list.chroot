@@ -12,6 +12,9 @@ firmware-iwlwifi
 amd64-microcode
 intel-microcode
 network-manager
+# Optional Wi-Fi hotspot (NetworkManager shared mode needs dnsmasq-base); never started at boot
+dnsmasq-base
+iw
 sudo
 polkitd
 pkexec
