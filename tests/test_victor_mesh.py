@@ -315,7 +315,8 @@ def test_firewall_and_sudoers():
 
 
 def test_control_centers_have_join_mesh():
-    html = (LIB / "web/index.html").read_text()
+    html = (LIB / "web/ext/mesh.html").read_text()
+    assert 'victorExt.on("mesh",loadMesh)' in (LIB / "web/ext/mesh.js").read_text()
     for t in ('id="t-mesh"', 'id="meshUrl"', 'id="meshKey" type="password"', "Join mesh", 'data-k="exit-node"', 'data-k="wol"',
               'data-k="taildrop"', 'data-k="share"', 'data-k="ssh"'):
         assert t in html
