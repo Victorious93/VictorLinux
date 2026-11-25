@@ -64,8 +64,8 @@ jobs:
       volumes:
         - /mnt:/mnt
     steps:
-      - name: Install git
-        run: pacman -Syu --noconfirm git
+      - name: Install git, python, curl
+        run: pacman -Syu --noconfirm git python curl
 
       - uses: actions/checkout@v4
 
