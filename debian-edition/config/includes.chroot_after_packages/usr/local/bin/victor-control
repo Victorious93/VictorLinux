@@ -117,7 +117,7 @@ class App(tk.Tk):
             ttk.Label(card, textvariable=sub, style="TileSub.TLabel", wraplength=140).pack(anchor="w")
             self.tiles[key] = (v, sub)
         self.nb = ttk.Notebook(self); self.nb.pack(fill="both", expand=True, padx=18, pady=12)
-        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_diag()
+        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_ssh(); self.tab_mesh(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_diag()
         self.after(500, self.refresh)
 
     # ---- helpers
@@ -343,6 +343,51 @@ class App(tk.Tk):
     def selftest(self):
         self.bg(lambda: ctl("api", "selftest", timeout=900), lambda r: self.out(self.remote_out, json.dumps(r, indent=2)), "testing endpoint...")
 
+
+    # ---- SSH (key-only, off by default; keys are kept on VICTORDATA so they survive a reboot)
+    def tab_ssh(self):
+        f = ttk.Frame(self.nb, padding=8); self.nb.add(f, text="SSH")
+        ttk.Label(f, wraplength=820, text="Remote shell for the owner account. Password logins are never allowed: paste a PUBLIC key "
+                  "(for example the line from ~/.ssh/id_ed25519.pub). Lines with options such as from=\"10.0.0.0/8\" are accepted. "
+                  "Keys are saved on your VICTORDATA drive and restored after a reboot; SSH itself stays off until you enable it.").pack(anchor="w")
+        ttk.Label(f, text="Public key(s), one per line").pack(anchor="w", pady=(8, 0))
+        self.ssh_keys = tk.Text(f, height=4, font="TkFixedFont"); self.ssh_keys.pack(fill="x")
+        self._themed.append(self.ssh_keys); self.apply_theme(self.mode)
+        row = ttk.Frame(f); row.pack(fill="x", pady=4)
+        ttk.Label(row, text="Listen address").pack(side="left")
+        self.ssh_bind = tk.StringVar(value="0.0.0.0"); ttk.Entry(row, textvariable=self.ssh_bind, width=24).pack(side="left", padx=4)
+        ttk.Label(row, text="(use your mesh address, or the Mesh tab's SSH switch, to keep it off the LAN)", style="TileSub.TLabel").pack(side="left")
+        b = ttk.Frame(f); b.pack(fill="x", pady=4)
+        for t, fn in (("Add keys and enable", self.ssh_add), ("Enable with saved keys", self.ssh_enable), ("Stop SSH", self.ssh_stop),
+                      ("Remove all keys and disable", self.ssh_revoke), ("Status", self.ssh_status)):
+            ttk.Button(b, text=t, command=fn).pack(side="left", padx=2)
+        self.ssh_out = self.mkout(f)
+
+    def _ssh_show(self, r):
+        self.out(self.ssh_out, json.dumps(r, indent=2) if not isinstance(r, str) else r)
+
+    def ssh_add(self):
+        text = self.ssh_keys.get("1.0", "end").strip()
+        if not text:
+            messagebox.showerror("VictorLinux", "Paste at least one public key first.")
+            return
+        bind = self.ssh_bind.get().strip()
+        self.bg(lambda: ctl("ssh", "enable", "--bind", bind, "--keys-stdin", stdin=text + "\n"),
+                lambda r: (self.ssh_keys.delete("1.0", "end"), self._ssh_show(r)))
+
+    def ssh_enable(self):
+        bind = self.ssh_bind.get().strip()
+        self.bg(lambda: ctl("ssh", "enable", "--bind", bind), self._ssh_show)
+
+    def ssh_stop(self):
+        self.bg(lambda: ctl("ssh", "stop"), self._ssh_show)
+
+    def ssh_revoke(self):
+        if messagebox.askyesno("Remove SSH keys", "Remove every SSH key (also the copy on VICTORDATA) and turn SSH off?"):
+            self.bg(lambda: ctl("ssh", "revoke"), self._ssh_show)
+
+    def ssh_status(self):
+        self.bg(lambda: ctl("ssh", "status"), self._ssh_show)
 
     # ---- Settings -> Audio -> Microphone (same model as `victor-mic`). UNVERIFIED: not rendered in the build sandbox.
     def tab_mic(self):
