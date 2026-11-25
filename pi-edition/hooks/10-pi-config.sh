@@ -61,7 +61,7 @@ done
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable NetworkManager.service bluetooth.service nftables.service systemd-timesyncd.service 2>/dev/null || true
 systemctl enable victor-storage.service victor-access.service victor-pi-board.service victor-pi-grow-data.service \
-  victor-pi-firstboot-file.service victor-pi-keys.service
+  victor-pi-firstboot-file.service victor-pi-keys.service victor-owner-console.service
 systemctl enable hciuart.service 2>/dev/null || true   # present only in some pi-bluetooth versions
 rm -f /etc/systemd/system/*.wants/victor-llama.service
 
@@ -89,6 +89,7 @@ visudo -cf /etc/sudoers.d/victor-pi-priv
 chmod 0755 /usr/local/bin/victor-* 2>/dev/null || true
 find /usr/local/lib/victorlinux -maxdepth 1 -type f -exec chmod 0755 {} +
 chmod 0750 /usr/local/lib/victorlinux/victor-priv /usr/local/lib/victorlinux/pi/victor-pi-priv
+chmod 0700 /usr/local/lib/victorlinux/victor-owner-setup   # root-only console tool, not in sudoers
 chmod 0755 /usr/local/lib/victorlinux/pi/victor-pi-grow-data /usr/local/lib/victorlinux/pi/hooks/run-hook
 chmod 0644 /usr/local/lib/victorlinux/pi/victorpi.py
 

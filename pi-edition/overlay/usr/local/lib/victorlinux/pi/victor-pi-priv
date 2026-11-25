@@ -7,7 +7,7 @@ import io, json, os, pwd, subprocess, sys
 sys.path.insert(0, "/usr/local/lib/victorlinux/pi")
 sys.path.insert(0, "/usr/local/lib/victorlinux")
 import victorpi
-from victorlib import safefs     # symlink-safe writes into the owner-controlled ~/.ssh
+from victorlib import safefs, ownertrust     # symlink-safe writes into ~/.ssh; seals for credentials kept on the data drive (F-10)
 
 OWNER = "victor"
 RUN = "/run/victor"
@@ -15,7 +15,6 @@ STATE = "/var/lib/victorlinux"
 DONE = f"{STATE}/firstboot.done"
 CMDLINE = "/boot/firmware/cmdline.txt"
 FIRSTBOOT_FILE = "/boot/firmware/victor-firstboot.conf"
-DATA_SECRETS = f"{RUN}/root/secrets"          # VICTORDATA via victor-storage.service
 
 
 def die(msg, code=2):
@@ -110,7 +109,7 @@ def valid_keys(text):
     return keys
 
 
-def install_keys(keys):
+def install_keys(keys, persist=True):
     uid, gid = owner(); d = f"/home/{OWNER}/.ssh"
     try:                         # ~/.ssh is owned by the unprivileged user: never follow a symlink or reuse a planted temp file
         dfd = safefs.open_dir(d, uid=uid, create=True)
@@ -121,8 +120,12 @@ def install_keys(keys):
             os.close(dfd)
     except OSError as e:
         die(f"Refusing to write {d}/authorized_keys: {e}")
-    if os.path.isdir(DATA_SECRETS):              # also kept on VICTORDATA so they survive reflashing the root partition
-        write(f"{DATA_SECRETS}/ssh_authorized_keys", "\n".join(keys) + "\n", 0o600)
+    drive = ownertrust.current_drive() if persist else None
+    if drive:                                    # also kept on VICTORDATA so they survive reflashing the root partition
+        try:                                     # sealed with this machine's key: a plugged-in drive cannot plant keys (F-10)
+            ownertrust.seal(drive, ownertrust.SSH_KEYS, "\n".join(keys) + "\n", uid, gid)
+        except (ownertrust.TrustError, OSError) as e:
+            print(f"note: keys installed but not saved on the data drive ({e})", file=sys.stderr)
 
 
 def cmd_ssh_keys():
@@ -134,9 +137,15 @@ def cmd_ssh_keys():
 
 
 def cmd_restore_keys():
-    src, dst = f"{DATA_SECRETS}/ssh_authorized_keys", f"/home/{OWNER}/.ssh/authorized_keys"
-    if os.path.exists(src) and not os.path.exists(dst):
-        install_keys(valid_keys(open(src).read())); print("SSH keys restored from the data partition")
+    dst = f"/home/{OWNER}/.ssh/authorized_keys"
+    drive = ownertrust.current_drive()
+    if not drive or os.path.exists(dst):
+        return
+    state, text = ownertrust.inspect(drive, ownertrust.load_key())[ownertrust.SSH_KEYS]
+    if state == "trusted":                       # only a copy this machine sealed; an unapproved drive is plain storage
+        install_keys(valid_keys(text), persist=False); print("SSH keys restored from the data partition")
+    elif state == "unapproved":
+        print("data drive holds SSH keys this machine has not approved; not restored (approve at the console)")
 
 
 def cmd_full_name(name):
@@ -189,8 +198,12 @@ def cmd_firstboot_file():
         install_keys(valid_keys("\n".join(cfg["SSH_AUTHORIZED_KEY"])))
     if cfg.get("PASSWORD_HASH"):
         run(["usermod", "-p", cfg["PASSWORD_HASH"], OWNER], check=True); run(["usermod", "-aG", "sudo", OWNER])
-        if os.path.isdir(DATA_SECRETS):           # same persistence record victor-priv set-password writes
-            write(f"{DATA_SECRETS}/owner.shadow", json.dumps({"hash": cfg["PASSWORD_HASH"]}), 0o600)
+        drive = ownertrust.current_drive()        # same persistence record victor-priv set-password writes (sealed)
+        if drive:
+            try:
+                ownertrust.seal(drive, ownertrust.OWNER_SHADOW, json.dumps({"hash": cfg["PASSWORD_HASH"]}), os.geteuid(), os.getegid())
+            except (ownertrust.TrustError, OSError) as e:
+                print(f"note: password set but not saved on the data drive ({e})", file=sys.stderr)
     if cfg.get("SSH_ENABLE", "no").lower() == "yes":
         r = run(["/usr/local/lib/victorlinux/victor-priv", "ssh-enable", f"/home/{OWNER}/.ssh/authorized_keys", "0.0.0.0"])
         print(r.stdout.strip() or r.stderr.strip())

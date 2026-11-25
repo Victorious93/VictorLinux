@@ -192,7 +192,7 @@ victor-storage status
 
 Drives are remembered by filesystem UUID, not `/dev/sdX`. If a chosen drive is unplugged, a later save **fails with an explanation** — nothing is silently written to RAM or another disk. Privileged work goes through `victor-priv`, which has no format or partition command. Full behaviour, filesystems and limits: [storage](storage.md). Health and encrypted backups: [storage health and backups](storage-health-backups.md).
 
-**Debian and Pi** auto-mount a single ext4 `VICTORDATA` or `TORIDATA` partition. Several such partitions: nothing is mounted until you choose. None: you may start an explicit temporary session (RAM only, lost at power-off). `victor-ctl storage init` only creates the folder layout on an already-mounted data volume; it does not format a disk.
+**Debian and Pi** auto-mount a single ext4 `VICTORDATA` or `TORIDATA` partition. A drive only counts as *yours* for credentials after you approve it at the console: your saved owner password and SSH keys are applied at boot only when this machine sealed them. On the Debian live USB you type your owner password on the text console once per boot (before the login screen); on a Pi the approval is remembered on the SD card. Press Enter to skip: the drive then works as plain storage and changes no account. Several such partitions: nothing is mounted until you choose. None: you may start an explicit temporary session (RAM only, lost at power-off). `victor-ctl storage init` only creates the folder layout on an already-mounted data volume; it does not format a disk.
 
 The running system must not treat the boot stick as a format target. `make-usb.sh` refuses the disk the OS booted from.
 

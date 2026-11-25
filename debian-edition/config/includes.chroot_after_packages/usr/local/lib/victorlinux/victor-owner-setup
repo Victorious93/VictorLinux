@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""victor-owner-setup: the owner's credentials, decided at the PHYSICAL CONSOLE. Root only.
+
+Not in sudoers and mode 0700: no process running as the owner (browser, model server, anything the owner starts) can call it.
+It is started by victor-owner-console.service on tty1 before the graphical login, so the person typing is the person at the
+machine.
+
+  approve    A data drive offers saved credentials (owner password hash, SSH keys) that this machine has not approved.
+             They are trusted only after the owner types the password they belong to (audit F-10). Skipping leaves the
+             drive as plain storage that never touches accounts, sudo or SSH keys.
+  console    approve (more steps are added by the first-password flow).
+"""
+import os, pwd, select, subprocess, sys, termios
+sys.path.insert(0, "/usr/local/lib/victorlinux")
+from victorlib import ownertrust
+from victorlib.common import run
+
+OWNER = ownertrust.OWNER
+PRIV = "/usr/local/lib/victorlinux/victor-priv"
+ATTEMPTS = 3
+DEFAULT_TIMEOUT = 300
+
+
+class Console:
+    """Prompts on stdin/stdout. A timeout or end of input counts as 'skip', never as consent."""
+
+    def __init__(self, timeout=DEFAULT_TIMEOUT, stdin=None, stdout=None):
+        self.timeout, self.stdin, self.stdout = timeout, stdin or sys.stdin, stdout or sys.stdout
+
+    def say(self, text=""):
+        print(text, file=self.stdout, flush=True)
+
+    def ask(self, prompt, secret=False):
+        self.stdout.write(prompt); self.stdout.flush()
+        fd = None
+        try:
+            fd = self.stdin.fileno() if self.stdin.isatty() else None
+        except (OSError, ValueError, AttributeError):
+            fd = None
+        old = None
+        try:
+            if fd is not None:
+                if secret:
+                    old = termios.tcgetattr(fd)
+                    new = termios.tcgetattr(fd); new[3] &= ~termios.ECHO
+                    termios.tcsetattr(fd, termios.TCSADRAIN, new)
+                if self.timeout and not select.select([self.stdin], [], [], self.timeout)[0]:
+                    self.say("\n(timed out; nothing was changed)")
+                    return None
+            line = self.stdin.readline()
+        finally:
+            if old is not None:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                self.stdout.write("\n"); self.stdout.flush()
+        if line == "":
+            return None
+        return line.rstrip("\n")
+
+
+def owner_ids():
+    p = pwd.getpwnam(OWNER)
+    return p.pw_uid, p.pw_gid
+
+
+def describe(drive):
+    r = run(["findmnt", "-n", "-o", "SOURCE", "--mountpoint", drive["mountpoint"]])
+    dev = r.stdout.strip()
+    extra = ""
+    if dev:
+        i = run(["lsblk", "-dn", "-o", "LABEL,SIZE,MODEL", dev]).stdout.strip()
+        extra = f" ({i})" if i else ""
+    return f"UUID {drive['uuid']}{extra}"
+
+
+def switch_to_console():
+    run(["chvt", "1"])
+
+
+def approve(con, run_priv=None):
+    """Returns 0 when there is nothing to do or the drive was approved, 1 when the owner declined/failed."""
+    drive = ownertrust.current_drive()
+    if not drive:
+        return 0
+    offered = ownertrust.inspect(drive, ownertrust.load_key())
+    held = [n for n, (s, _) in offered.items() if s == "unapproved"]
+    if not held:
+        return 0
+    drive_text = ownertrust.peek(drive, ownertrust.OWNER_SHADOW) if ownertrust.OWNER_SHADOW in held else None
+    drive_hash = ownertrust.hash_text_of(drive_text) if drive_text else None
+    cur = None if ownertrust.owner_locked() else ownertrust.owner_hash()
+    if not drive_hash and not (cur and ownertrust.valid_hash(cur)):
+        return 1                      # nothing to prove against: the drive stays plain storage (never a way to unlock)
+    switch_to_console()
+    con.say("")
+    con.say("=" * 70)
+    con.say(" VictorLinux: the data drive holds saved credentials this machine has not approved")
+    con.say(f" Drive: {describe(drive)}")
+    con.say(f" Holds: {', '.join(held)}")
+    con.say(" Nothing from it is applied (no password, no sudo, no SSH keys) unless you approve.")
+    con.say(" To approve, type the owner password that belongs to this drive.")
+    con.say(" Press Enter to skip: the drive then works as plain storage only.")
+    con.say("=" * 70)
+    which = None
+    for _ in range(ATTEMPTS):
+        pw = con.ask("Owner password (Enter to skip): ", secret=True)
+        if not pw:
+            con.say("Skipped. The drive stays plain storage.")
+            return 1
+        if drive_hash and ownertrust.verify_password(drive_hash, pw):
+            which = "drive"; break
+        if cur and ownertrust.valid_hash(cur) and ownertrust.verify_password(cur, pw):
+            which = "current"; break
+        con.say("That password does not match.")
+    if not which:
+        con.say("Not approved. The drive stays plain storage.")
+        return 1
+    uid, gid = owner_ids()
+    key = ownertrust.load_key(create=True)
+    try:
+        if which == "drive":
+            ownertrust.seal(drive, ownertrust.OWNER_SHADOW, drive_text, os.geteuid(), os.getegid(), key)
+        if ownertrust.SSH_KEYS in held:
+            ownertrust.seal(drive, ownertrust.SSH_KEYS, ownertrust.peek(drive, ownertrust.SSH_KEYS) or "", uid, gid, key)
+    except (ownertrust.TrustError, OSError) as e:
+        con.say(f"Could not record the approval ({e}). The drive stays plain storage this boot.")
+        return 1
+    out = (run_priv or (lambda: run([PRIV, "access-apply"])))()
+    con.say("Approved. " + ((getattr(out, "stdout", "") or "").strip()))
+    return 0
+
+
+def main(argv):
+    if os.geteuid() != 0:
+        print("victor-owner-setup must run as root on the console", file=sys.stderr)
+        return 2
+    if os.environ.get("SUDO_USER") or os.environ.get("SUDO_UID"):
+        print("victor-owner-setup refuses to run through sudo", file=sys.stderr)
+        return 2
+    args = argv[1:]
+    cmd = args[0] if args else "console"
+    timeout = DEFAULT_TIMEOUT
+    if "--timeout" in args:
+        timeout = int(args[args.index("--timeout") + 1])
+    if cmd not in ("approve", "console"):
+        print(__doc__, file=sys.stderr)
+        return 2
+    con = Console(timeout=timeout)
+    approve(con)                   # declining is a normal outcome, never a failed boot
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

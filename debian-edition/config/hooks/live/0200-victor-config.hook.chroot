@@ -46,7 +46,7 @@ systemctl disable victor-input.service 2>/dev/null || true
 systemctl disable tailscaled.service 2>/dev/null || true
 systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer fstrim.timer 2>/dev/null || true
 systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
-systemctl enable nftables.service victor-storage.service victor-access.service 2>/dev/null || true
+systemctl enable nftables.service victor-storage.service victor-access.service victor-owner-console.service 2>/dev/null || true
 # blueman would otherwise auto-start and may power the adapter on login.
 if [ -f /etc/xdg/autostart/blueman.desktop ]; then
   printf '\nHidden=true\nX-GNOME-Autostart-enabled=false\n' >> /etc/xdg/autostart/blueman.desktop
@@ -74,6 +74,8 @@ visudo -cf /etc/sudoers.d/victor-priv
 # --- permissions of shipped tools
 chmod 0755 /usr/local/bin/victor-* /usr/local/lib/victorlinux/* 2>/dev/null || true
 chmod 0750 /usr/local/lib/victorlinux/victor-priv
+# root-only console tool: not in sudoers, so nothing running as the owner can call it (F-10/F-13)
+chmod 0700 /usr/local/lib/victorlinux/victor-owner-setup
 
 # --- bounded logs (flash-friendly): journald in RAM, capped
 # directories created here, never assumed: git does not track empty dirs, so a clean checkout lacks them
