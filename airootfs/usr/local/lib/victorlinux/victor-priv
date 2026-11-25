@@ -18,6 +18,7 @@ import victorstorage as vs  # noqa: E402
 import diskhealth  # noqa: E402
 import victorssh  # noqa: E402
 import hotspot  # noqa: E402
+import safefs  # noqa: E402
 
 RUN = "/run/victor"
 STATE = f"{RUN}/persist.json"
@@ -107,14 +108,30 @@ def mounted_at(path):
 
 
 def ensure_tree(root):
+    """Create the data folders and hand them to the desktop user. `root` lives on a drive we do not control, so nothing
+    here follows a symlink: a hostile drive could otherwise point models/ at /etc and have it chown'ed to the user."""
     pw = pwd.getpwnam(USER)
-    for s in SUBDIRS:
-        p = os.path.join(root, s)
-        os.makedirs(p, exist_ok=True)
-        os.chown(p, pw.pw_uid, pw.pw_gid)
-    os.chmod(os.path.join(root, "config"), 0o700)
-    os.chmod(root, 0o755)
-    os.chown(root, pw.pw_uid, pw.pw_gid)
+    try:
+        rfd = safefs.open_dir(root)
+    except safefs.UnsafePath as e:
+        raise ValueError(f"Refusing: the data folder is a symbolic link ({e})") from e
+    try:
+        for s in SUBDIRS:
+            try:
+                os.mkdir(s, 0o755, dir_fd=rfd)
+            except FileExistsError:
+                pass
+            try:
+                fd = os.open(s, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=rfd)
+            except OSError as e:
+                raise ValueError(f"Refusing: '{s}' on the data drive is a symbolic link or not a folder") from e
+            try:
+                safefs.chown_dir(fd, pw.pw_uid, pw.pw_gid, 0o700 if s == "config" else None)
+            finally:
+                os.close(fd)
+        safefs.chown_dir(rfd, pw.pw_uid, pw.pw_gid, 0o755)
+    finally:
+        os.close(rfd)
 
 
 def link_home(root):
@@ -307,6 +324,8 @@ def cmd_persist_mount(a):
         die("Mount failed: " + r.stderr.strip())
     try:
         root = persistence_root(DATA_MNT)
+        if os.path.islink(root):
+            raise ValueError("the data folder on that drive is a symbolic link")
         os.makedirs(root, exist_ok=True)
         probe = os.path.join(root, ".write-test")
         with open(probe, "w") as f:
@@ -387,10 +406,22 @@ def cmd_mount_ro(a):
     print(mount_volume(part_by_uuid(a[0]), want_ro=True)["mountpoint"])
 
 
+def _read_keys():
+    """authorized_keys text, read without following symlinks (the folder belongs to an unprivileged user)."""
+    try:
+        dfd = safefs.open_dir(os.path.dirname(KEYS), uid=pwd.getpwnam(USER).pw_uid)
+    except (OSError, KeyError):
+        return ""
+    try:
+        return safefs.read_file(dfd, "authorized_keys") or ""
+    except OSError:
+        return ""
+    finally:
+        os.close(dfd)
+
+
 def cmd_ssh_status(_a):
-    keys = 0
-    if os.path.exists(KEYS):
-        keys = victorssh.count_keys(KEYS)
+    keys = victorssh.count_keys(KEYS)
     active = run(["systemctl", "is-active", "sshd"]).stdout.strip()
     listen = None
     if os.path.exists(SSHD_DROPIN):
@@ -452,14 +483,21 @@ def cmd_ssh_add_key(_a):
     except victorssh.SSHKeyError as e:
         die(str(e))
     pw = pwd.getpwnam(USER)
-    d = os.path.dirname(KEYS)
-    os.makedirs(d, exist_ok=True)
-    os.chown(d, pw.pw_uid, pw.pw_gid)
-    os.chmod(d, 0o700)
-    with open(KEYS, "a") as f:
-        f.write(line + "\n")
-    os.chown(KEYS, pw.pw_uid, pw.pw_gid)
-    os.chmod(KEYS, 0o600)
+    try:
+        dfd = safefs.open_dir(os.path.dirname(KEYS), uid=pw.pw_uid, create=True)
+        try:
+            safefs.chown_dir(dfd, pw.pw_uid, pw.pw_gid, 0o700)
+            try:
+                cur = safefs.read_file(dfd, "authorized_keys") or ""
+            except safefs.UnsafePath:        # a planted link: replace it, never read or write through it
+                cur = ""
+            if cur and not cur.endswith("\n"):
+                cur += "\n"
+            safefs.write_file(dfd, "authorized_keys", cur + line + "\n", pw.pw_uid, pw.pw_gid, 0o600)
+        finally:
+            os.close(dfd)
+    except OSError as e:
+        die(f"Refusing to touch {os.path.dirname(KEYS)}: {e}")
     saved = save_ssh_keys()
     print("Key added: " + fp + ("" if saved else " (not saved: no persistent storage, so it is gone after a reboot)"))
 
@@ -471,7 +509,7 @@ def cmd_ssh_enable(a):
         addr = str(ipaddress.ip_address(a[0]))
     except ValueError:
         die("Listen address must be an IP address.")
-    if not os.path.exists(KEYS) or not open(KEYS).read().strip():
+    if not _read_keys().strip():
         die("Add an SSH public key first. Password logins are not supported.")
     save_ssh_keys()
     os.makedirs(os.path.dirname(SSHD_DROPIN), exist_ok=True)

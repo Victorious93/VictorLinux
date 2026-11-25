@@ -7,7 +7,7 @@ commands, mounts only partitions that are ext4 + label VICTORDATA or TORIDATA, a
 import json, os, pwd, re, shutil, subprocess, sys
 sys.path.insert(0, "/usr/local/lib/victorlinux")
 from victorlib.common import *
-from victorlib import storage, diskhealth
+from victorlib import storage, diskhealth, safefs
 import victorssh
 
 OWNER = "victor"
@@ -233,13 +233,13 @@ def cmd_ssh_enable(keyfile, bind):
     if not lines:
         die("no public keys found; paste a line from ~/.ssh/id_ed25519.pub")
     uid, gid = uid_gid()
-    d = os.path.dirname(LIVE_KEYS)
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    os.chown(d, uid, gid); os.chmod(d, 0o700)
-    victorssh.write_keys(LIVE_KEYS, lines, uid, gid)
-    saved = saved_keys_path()
-    if saved:
-        victorssh.write_keys(saved, lines, uid, gid)
+    try:                       # ~/.ssh belongs to the unprivileged owner: victorssh never follows a symlink there
+        victorssh.write_keys(LIVE_KEYS, lines, uid, gid, dir_mode=0o700)
+        saved = saved_keys_path()
+        if saved:
+            victorssh.write_keys(saved, lines, uid, gid)
+    except OSError as e:
+        die(f"Refusing to write the authorized_keys file: {e}")
     os.makedirs("/etc/ssh/sshd_config.d", exist_ok=True)
     open(SSHD_DROPIN, "w").write(
         f"PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers {OWNER}\n"
