@@ -33,6 +33,9 @@ curl -fsSL -o "$ui_tmp/dist.tar.gz" "$ui_base/dist.tar.gz?download=true"
 want_ui=$(awk '{print $1}' "$ui_tmp/dist.tar.gz.sha256")
 got_ui=$(sha256sum "$ui_tmp/dist.tar.gz" | awk '{print $1}')
 [ "$want_ui" = "$got_ui" ] || { echo "ERROR: llama UI bundle checksum mismatch" >&2; exit 1; }
+# the checksum above comes from the same server as the bundle, so it only catches corruption: also compare with our own pin
+pin_ui=$(opt checksums llama_ui)
+[ "$pin_ui" = "$got_ui" ] || { echo "ERROR: llama UI bundle $got_ui does not match the pin in .ci/options.ini ($pin_ui)" >&2; exit 1; }
 mkdir -p "$dest/llama.cpp/tools/ui/dist"
 tar -xzf "$ui_tmp/dist.tar.gz" -C "$dest/llama.cpp/tools/ui/dist"
 [ -f "$dest/llama.cpp/tools/ui/dist/index.html" ] || { echo "ERROR: UI bundle has no index.html" >&2; exit 1; }
@@ -43,7 +46,10 @@ echo "llama UI bundle $got_ui"
 # nvidia-pstated (CUDA platform only uses it): fetched here so the chroot needs no TLS/network access.
 ps_url="$(opt repositories nvidia_pstated)/releases/download/$(opt revisions nvidia_pstated)/$(opt files nvidia_pstated)"
 curl -fsSL -o "$dest/nvidia-pstated" "$ps_url"
+pin_ps=$(opt checksums nvidia_pstated)
+got_ps=$(sha256sum "$dest/nvidia-pstated" | awk '{print $1}')
+[ "$pin_ps" = "$got_ps" ] || { rm -f "$dest/nvidia-pstated"; echo "ERROR: nvidia-pstated $got_ps does not match the pin in .ci/options.ini ($pin_ps)" >&2; exit 1; }
 chmod +x "$dest/nvidia-pstated"
-sha256sum "$dest/nvidia-pstated" | awk '{print $1}' > "$dest/nvidia-pstated.sha256"
+echo "$got_ps" > "$dest/nvidia-pstated.sha256"
 echo "nvidia-pstated $(cat "$dest/nvidia-pstated.sha256")"
 echo "llama.cpp $tag = $got"
