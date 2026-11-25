@@ -32,6 +32,20 @@ HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", 
        "transfer-encoding", "upgrade", "host", "content-length", "authorization"}
 
 
+SWAP_WAIT_S = 180            # hold API requests this long while the Control Center switches models
+
+
+def swap_state():
+    """The Control Center writes RUN_DIR/swap.json while it switches models and removes it when the new model answers
+    (or the switch failed and the old one is back). Older than 15 minutes = stale, ignored."""
+    try:
+        with open(os.path.join(tc.RUN_DIR, "swap.json")) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return st if isinstance(st, dict) and time.time() - float(st.get("since", 0)) < 900 else None
+
+
 class State:
     last_request = time.time()
     lock = threading.Lock()
@@ -166,7 +180,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/victor/health", "/tori/health"):
             up = self._upstream_ok()
-            return self._json(200 if up else 503, {"status": "ok" if up else "model_not_running",
+            sw = swap_state()
+            return self._json(200 if up and not sw else 503, {"status": "switching_model" if sw else "ok" if up else "model_not_running",
                                                    "gateway": "ok", "auth_required": self.cfg["require_auth"]})
         if path == "/victor/pair":
             return self._pair()
@@ -207,7 +222,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             raise ValueError("invalid JSON body")
 
+    def _await_swap(self, limit=None):
+        """Hold the request while a model switch is in progress. True = go ahead; False = still switching."""
+        deadline = time.time() + (SWAP_WAIT_S if limit is None else limit)
+        while swap_state() is not None:
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.25)
+        return True
+
+    def _switching(self):
+        st = swap_state() or {}
+        return self._json(503, {"error": {"message": f"The model is being switched to {st.get('to') or 'another model'}. Retry in a few seconds.",
+                                          "type": "model_switching"}}, {"Retry-After": "10"})
+
     def _up(self, method, path, body=None):
+        if not self._await_swap():
+            raise OSError("model switch in progress")
         c = http.client.HTTPConnection("127.0.0.1", self.cfg["upstream_port"], timeout=600)
         c.request(method, path, body=None if body is None else json.dumps(body).encode(),
                   headers={"Authorization": "Bearer " + self.cfg["upstream_key"], "Content-Type": "application/json"})
@@ -340,6 +371,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         hdrs["Authorization"] = "Bearer " + self.cfg["upstream_key"]
         with State.lock:
             State.last_request = time.time()
+        if not self._await_swap():
+            return self._switching()
         try:
             c = http.client.HTTPConnection("127.0.0.1", self.cfg["upstream_port"], timeout=600)
             c.request(self.command, self.path, body=body, headers=hdrs)

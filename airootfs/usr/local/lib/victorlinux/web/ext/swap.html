@@ -1,0 +1,4 @@
+<div class="card" id="swCard" hidden><h2><svg><use href="#i-cube"/></svg>Switch model (no reboot)</h2>
+ <p class="mut">Loads another model while the API stays up. Requests that arrive during the switch wait (up to 3 minutes) and are then answered by the new model. If the new model fails, the previous one is started again.</p>
+ <div class="row"><div><label for="swSel">Model</label><select id="swSel" style="min-width:260px"></select></div><button class="b" id="swGo">Switch now</button></div>
+ <div id="swOut" aria-live="polite"></div></div>
