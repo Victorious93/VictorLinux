@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # VictorLinux (Debian edition) local build entry point.
-# Usage: sudo ./build.sh [--profile amd|nvidia] [--workdir DIR] [--out DIR] [--clean]
+# Usage: sudo ./build.sh [--profile amd|nvidia] [--workdir DIR] [--out DIR] [--clean] [--no-rustdeskv]
 # Requires root, Debian live-build (>= 20250505) and ~20 GiB free disk, 8 GiB RAM recommended, internet (BUILD time only).
 set -Eeuo pipefail
 trap 'echo "build.sh: FAILED at line $LINENO (exit $?)" >&2' ERR
@@ -13,6 +13,7 @@ while [ $# -gt 0 ]; do
     --workdir) WORKDIR="$2"; shift 2;;
     --out) OUT="$2"; shift 2;;
     --clean) CLEAN=1; shift;;
+    --no-rustdeskv) VICTOR_RUSTDESKV=0; shift;;
     -h|--help) sed -n '2,5p' "${BASH_SOURCE[0]}"; exit 0;;
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
@@ -71,6 +72,8 @@ rm -f config/package-lists/*.nvidia
 install -d config/includes.chroot_after_packages/usr/share/victorlinux
 cp "$HERE/versions.env" config/includes.chroot_after_packages/usr/share/victorlinux/versions.env
 echo "$PROFILE" > config/includes.chroot_after_packages/usr/share/victorlinux/profile
+# RustDeskV is built in by default; VICTOR_RUSTDESKV=0 (or --no-rustdeskv) leaves it out and the image still builds
+if [ "${VICTOR_RUSTDESKV:-1}" = "0" ]; then echo "RUSTDESKV=0" >> config/includes.chroot_after_packages/usr/share/victorlinux/versions.env; fi
 # Optional: build hosts behind a TLS-intercepting proxy. EXTRA_CA_BUNDLE=/path/ca.pem [BUILD_HTTPS_PROXY=url]
 # The material is used only inside the chroot during the build and removed by hook 9999 (never shipped).
 if [ -n "${EXTRA_CA_BUNDLE:-}" ]; then

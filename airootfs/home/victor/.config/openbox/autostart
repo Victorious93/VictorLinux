@@ -3,3 +3,5 @@ tint2 &
 # Control Center is local-only; it does not load a model until you press Start.
 ( victor-storage apply >/dev/null 2>&1 ) &
 ( sleep 2; victor-open ) &
+# Opt-in (`victor-rustdeskv autostart on`): open the RustDeskV window at login.
+( [ -e "$HOME/.config/autostart/victor-rustdeskv.desktop" ] && command -v rustdesk >/dev/null && sleep 4 && rustdesk ) &

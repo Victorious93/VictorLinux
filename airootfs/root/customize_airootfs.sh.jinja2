@@ -21,6 +21,32 @@ fi
 
 find /root -type f -name "*.jinja2" -print -delete
 
+{% if rustdeskv %}
+# RustDeskV (built in; leave out with --no-rustdeskv / VICTOR_RUSTDESKV=0). Installed OFFLINE from the file that
+# scripts/prepare-sources.sh fetched and checked against the SHA-256 pinned in .ci/options.ini. Libraries come from the
+# package list. --noscriptlet: the package's own post-install would start its stock service in the chroot; the image uses
+# victor-rustdeskv.service instead, which does not run until the owner has chosen a password.
+[ -f /root/sources/rustdeskv/rustdeskv.pkg.tar.zst ] || { echo "RustDeskV package missing: run scripts/prepare-sources.sh (or build with --no-rustdeskv)" >&2; exit 1; }
+pacman -U --noconfirm --noscriptlet --nodeps --nodeps /root/sources/rustdeskv/rustdeskv.pkg.tar.zst
+[ -x /usr/bin/rustdesk ] || { echo "RustDeskV install failed: /usr/bin/rustdesk missing" >&2; exit 1; }
+systemctl disable rustdesk.service 2>/dev/null || true
+systemctl enable victor-rustdeskv-restore.service victor-rustdeskv.service
+{% if type == "gui" %}
+install -m 644 /usr/share/rustdesk/files/rustdesk.desktop /usr/share/rustdesk/files/rustdesk-link.desktop /usr/share/applications/
+{% endif %}
+# the ID and keys are made per device at first run; none may exist in the image
+rm -rf /root/.config/rustdesk
+{% endif %}
+{% if not rustdeskv or type != "gui" %}
+rm -f /usr/share/applications/victor-rustdeskv.desktop /usr/share/applications/victor-rustdeskv-setup.desktop
+{% endif %}
+{% if not rustdeskv %}
+rm -f /usr/local/bin/victor-rustdeskv /usr/local/lib/victorlinux/victor-rustdeskv-priv /usr/local/lib/victorlinux/victorrustdeskv.py \
+      /etc/systemd/system/victor-rustdeskv.service /etc/systemd/system/victor-rustdeskv-restore.service
+sed -i '/victor-rustdeskv-priv/d' /etc/sudoers.d/10-victor
+{% endif %}
+
+
 # user and runtime dirs with correct ownership
 install -d -o victor -g victor -m 700 /home/victor /home/victor/.cache/victorlinux
 chown -R victor:victor /home/victor
@@ -82,6 +108,7 @@ VictorLinux (Victorious fork)
 platform={{ platform }} type={{ type }} packs={{ packs|join(",") or "none" }}
 arch_snapshot={{ build.arch_snapshot }}
 $(cat /opt/llama.cpp/BUILDINFO 2>/dev/null || echo "llama.cpp: not included")
+$(pacman -Q rustdesk 2>/dev/null | sed 's/^rustdesk /rustdeskv: rustdesk /' || true)
 REL
 
 rm -fr "$CUSTOMIZE_AIROOTFS"

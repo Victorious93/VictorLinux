@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""victor-rustdeskv: set up and check the RustDeskV remote-access host built into VictorLinux.
+
+  victor-rustdeskv status              what is installed, running and configured (no secrets)
+  victor-rustdeskv setup               choose YOUR password (hidden prompt); this is what turns unattended access on
+  victor-rustdeskv setup --password-stdin   same, password read from stdin (for scripts over a trusted channel)
+  victor-rustdeskv disable             stop the host and keep it off until you run setup again
+  victor-rustdeskv reset               disable and delete this PC's RustDeskV ID and password
+  victor-rustdeskv relay               show the self-hosted server config (empty = public RustDesk servers)
+  victor-rustdeskv autostart on|off    GUI builds: open the RustDeskV window at login
+  victor-rustdeskv open                GUI builds: open the RustDeskV window
+
+Until `setup` has succeeded the host does not run, so there is nothing to connect to and no default password exists.
+"""
+import getpass
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/local/lib/victorlinux")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "victorlinux"))
+import victorrustdeskv as rv  # noqa: E402
+
+PRIV = os.environ.get("VICTOR_RUSTDESKV_PRIV", "/usr/local/lib/victorlinux/victor-rustdeskv-priv")
+
+
+def priv(verb, stdin=None):
+    cmd = [PRIV, verb] if os.geteuid() == 0 else ["sudo", "-n", PRIV, verb]
+    return subprocess.run(cmd, input=stdin, text=True, capture_output=True)
+
+
+def say_priv(verb, stdin=None):
+    r = priv(verb, stdin)
+    sys.stdout.write(r.stdout)
+    sys.stderr.write(r.stderr)
+    return r.returncode
+
+
+def cmd_status():
+    r = priv("status")
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        return r.returncode
+    s = json.loads(r.stdout)
+    if not s["installed"]:
+        print("RustDeskV: not installed (this image was built with RustDeskV turned off).")
+        return 0
+    print(f"RustDeskV host: {'ON' if s['unit_active'] == 'active' else 'OFF'}")
+    print("  first-boot setup:", "done" if s["setup_done"] else "NOT DONE, run: victor-rustdeskv setup")
+    if s["id"]:
+        print("  ID:", s["id"])
+    print("  access policy: permanent password only (no one-time passwords, no click-to-accept)")
+    print("  servers:", {"public": "public RustDesk servers", "custom": "your own server (rustdeskv-relay.conf)"}.get(
+        s["servers"], "INVALID relay config: " + s["relay_error"]))
+    print("  settings:", "kept on persistent storage" if s["config_persistent"] else "RAM only (temporary session)")
+    return 0
+
+
+def cmd_setup(args):
+    if args == ["--password-stdin"]:
+        pw = sys.stdin.readline().rstrip("\n")
+    elif not args:
+        print("Choose the password for unattended RustDeskV access to this PC.")
+        print(f"At least {rv.MIN_PASSWORD} characters. Nothing is set until you do this; there is no default.")
+        pw = getpass.getpass("New password: ")
+        if getpass.getpass("Repeat password: ") != pw:
+            print("The two entries differ. Nothing was changed.", file=sys.stderr)
+            return 1
+    else:
+        print(__doc__, file=sys.stderr)
+        return 2
+    try:
+        rv.validate_password(pw)
+    except rv.SetupError as e:
+        print(f"{e}. Nothing was changed.", file=sys.stderr)
+        return 1
+    return say_priv("setup", pw + "\n")
+
+
+def cmd_relay():
+    try:
+        cfg = rv.load_relay()
+    except rv.SetupError as e:
+        print("relay config is invalid:", e, file=sys.stderr)
+        return 1
+    if not cfg["rendezvous_server"]:
+        print(f"No self-hosted server set: public RustDesk servers are used. Edit {rv.RELAY_CONF} as root to change that.")
+    for k, v in cfg.items():
+        print(f"{k} = {v or '(empty)'}" if k != "key" else f"key = {'(set)' if v else '(empty)'}")
+    return 0
+
+
+def cmd_autostart(args):
+    path = rv.autostart_desktop(os.path.expanduser("~"))
+    if args == ["on"]:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(rv.AUTOSTART_ENTRY)
+        print("RustDeskV will open at login. Undo with: victor-rustdeskv autostart off")
+        return 0
+    if args == ["off"]:
+        if os.path.exists(path):
+            os.unlink(path)
+        print("RustDeskV will not open at login.")
+        return 0
+    print("usage: victor-rustdeskv autostart on|off", file=sys.stderr)
+    return 2
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    c, rest = argv[0], argv[1:]
+    if c == "status" and not rest:
+        return cmd_status()
+    if c == "setup":
+        return cmd_setup(rest)
+    if c in ("disable", "reset") and not rest:
+        return say_priv(c)
+    if c == "relay" and not rest:
+        return cmd_relay()
+    if c == "autostart":
+        return cmd_autostart(rest)
+    if c == "open" and not rest:
+        os.execvp("rustdesk", ["rustdesk"])
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

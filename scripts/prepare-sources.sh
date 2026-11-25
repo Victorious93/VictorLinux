@@ -52,4 +52,19 @@ got_ps=$(sha256sum "$dest/nvidia-pstated" | awk '{print $1}')
 chmod +x "$dest/nvidia-pstated"
 echo "$got_ps" > "$dest/nvidia-pstated.sha256"
 echo "nvidia-pstated $(cat "$dest/nvidia-pstated.sha256")"
+# RustDeskV (built into headless and gui images; skipped with VICTOR_RUSTDESKV=0). Fetched here so the chroot needs no network,
+# and compared with the SHA-256 pinned in .ci/options.ini: a mismatch stops the build instead of shipping an unknown binary.
+if [ "${VICTOR_RUSTDESKV:-1}" != "0" ]; then
+  rd_ver=$(opt rustdeskv version); rd_file=$(opt rustdeskv arch_file)
+  rd_url="$(opt rustdeskv repository)/releases/download/$rd_ver/$rd_file"
+  mkdir -p "$dest/rustdeskv"
+  curl -fsSL --proto '=https' --tlsv1.2 -o "$dest/rustdeskv/rustdeskv.pkg.tar.zst" "$rd_url"
+  pin_rd=$(opt checksums rustdeskv_arch)
+  got_rd=$(sha256sum "$dest/rustdeskv/rustdeskv.pkg.tar.zst" | awk '{print $1}')
+  [ "$pin_rd" = "$got_rd" ] || { rm -rf "$dest/rustdeskv"; echo "ERROR: RustDeskV package $got_rd does not match the pin in .ci/options.ini ($pin_rd)" >&2; exit 1; }
+  echo "$got_rd" > "$dest/rustdeskv/rustdeskv.sha256"
+  echo "RustDeskV $rd_ver $got_rd"
+else
+  echo "RustDeskV skipped (VICTOR_RUSTDESKV=0)"
+fi
 echo "llama.cpp $tag = $got"

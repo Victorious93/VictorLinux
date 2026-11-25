@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""victor-rustdeskv-priv: the root half of the RustDeskV host (run via `sudo -n`). Fixed verbs, strict validation.
+
+Verbs: status | setup (owner password on stdin, one line) | apply | mount | umount | restore | disable | reset.
+It never takes a command, path or flag from the caller and never prints or stores the password.
+There is no default password: until `setup` succeeds, victor-rustdeskv.service does not start at all.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import victorrustdeskv as rv  # noqa: E402
+
+
+def die(msg, code=2):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def run(cmd, timeout=30, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(cmd, 127, "", f"{cmd[0]} not found")
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, "", f"{cmd[0]} timed out")
+
+
+def installed():
+    return os.access(rv.BIN, os.X_OK)
+
+
+def rd(*args, timeout=15):
+    return run([rv.BIN, *args], timeout=timeout)
+
+
+def wipe_password(text, pw):
+    return text.replace(pw, "***") if pw else text
+
+
+def persistent_cfg():
+    base, persistent = rv.persist_dir()
+    return (os.path.join(base, "config"), base) if persistent else (None, None)
+
+
+def write_marker(directory):
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+    with open(os.path.join(directory, "enabled"), "w") as f:
+        f.write("1\n")
+
+
+def cmd_mount():
+    """Keep the root-run service's config (ID, keys, password hash) on persistent storage when there is some."""
+    cfg, _ = persistent_cfg()
+    os.makedirs(rv.CONFIG_DIR, mode=0o700, exist_ok=True)
+    if not cfg:
+        return                                           # temporary session: RAM only, set up again after power-off
+    os.makedirs(cfg, mode=0o700, exist_ok=True)
+    os.chmod(cfg, 0o700)
+    if run(["mountpoint", "-q", rv.CONFIG_DIR]).returncode == 0:
+        return
+    r = run(["mount", "--bind", cfg, rv.CONFIG_DIR])
+    if r.returncode != 0:
+        die("could not keep the RustDeskV config on persistent storage: " + (r.stderr or "").strip()[-200:])
+
+
+def cmd_umount():
+    if run(["mountpoint", "-q", rv.CONFIG_DIR]).returncode == 0:
+        run(["umount", rv.CONFIG_DIR])
+
+
+def cmd_apply():
+    """Fail closed: if the policy cannot be confirmed, the service stops (ExecStartPost fails)."""
+    try:
+        relay = rv.load_relay()
+    except rv.SetupError as e:
+        die(f"relay config rejected: {e}")
+    wanted = list(rv.POLICY) + rv.relay_options(relay)
+    deadline = time.time() + 45
+    last = ""
+    while time.time() < deadline:
+        ok = True
+        for k, v in wanted:
+            r = rd("--option", k, v)
+            got = rd("--option", k)
+            if got.returncode != 0 or got.stdout.strip() != v:
+                ok = False
+                last = (got.stdout or got.stderr).strip()[-200:]
+                break
+        if ok:
+            print("policy applied: permanent password only, no click-to-accept"
+                  + (", custom server" if relay["rendezvous_server"] else ", public RustDesk servers"))
+            return
+        time.sleep(1)
+    die("RustDeskV did not accept the access policy in time; refusing to leave it running. " + last)
+
+
+def cmd_setup():
+    if not installed():
+        die("RustDeskV is not installed in this image (it was built with it turned off).")
+    pw = sys.stdin.readline().rstrip("\n")
+    try:
+        rv.validate_password(pw)
+        rv.load_relay()
+    except rv.SetupError as e:
+        die(str(e))
+    os.makedirs(rv.STATE_DIR, mode=0o700, exist_ok=True)
+    write_marker(rv.STATE_DIR)
+    r = run(["systemctl", "start", rv.UNIT], timeout=90)
+    if r.returncode != 0:
+        os.unlink(rv.MARKER)
+        log = run(["journalctl", "-u", rv.UNIT, "-n", "8", "--no-pager"]).stdout
+        die("could not start the RustDeskV service: " + wipe_password((r.stderr or log).strip()[-400:], pw))
+    out = None
+    for _ in range(20):
+        out = rd("--password", pw)
+        if "Done!" in (out.stdout or ""):
+            break
+        time.sleep(1)
+    if not out or "Done!" not in (out.stdout or ""):
+        run(["systemctl", "stop", rv.UNIT], timeout=60)
+        if os.path.exists(rv.MARKER):
+            os.unlink(rv.MARKER)
+        die("RustDeskV refused the password: " + wipe_password(((out.stdout or "") + (out.stderr or "")).strip()[-300:], pw))
+    _, base = persistent_cfg()
+    if base:
+        write_marker(base)
+    run(["systemctl", "enable", rv.UNIT])
+    print("RustDeskV host is on. Unattended access works only with the password you just set."
+          + ("" if base else " This is a temporary session: run setup again after the next boot."))
+
+
+def cmd_restore():
+    _, base = persistent_cfg()
+    if base and os.path.exists(os.path.join(base, "enabled")):
+        os.makedirs(rv.STATE_DIR, mode=0o700, exist_ok=True)
+        write_marker(rv.STATE_DIR)
+
+
+def cmd_disable():
+    run(["systemctl", "stop", rv.UNIT], timeout=60)
+    run(["systemctl", "enable", rv.UNIT])                # stays enabled; the missing marker is what keeps it from starting
+    for d in (rv.STATE_DIR, persistent_cfg()[1]):
+        if d and os.path.exists(os.path.join(d, "enabled")):
+            os.unlink(os.path.join(d, "enabled"))
+    print("RustDeskV host stopped. It will not start again until you run setup.")
+
+
+def cmd_reset():
+    cmd_disable()
+    cmd_umount()
+    cfg, _ = persistent_cfg()
+    for d in (cfg, rv.CONFIG_DIR):
+        if d and os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+    print("RustDeskV identity and password removed. A new ID is made at the next setup.")
+
+
+def cmd_status():
+    active = run(["systemctl", "is-active", rv.UNIT], timeout=10).stdout.strip()
+    enabled = run(["systemctl", "is-enabled", rv.UNIT], timeout=10).stdout.strip()
+    try:
+        relay = rv.load_relay()
+        relay_state = "custom" if relay["rendezvous_server"] else "public"
+        relay_err = ""
+    except rv.SetupError as e:
+        relay_state, relay_err = "invalid", str(e)
+    _, persistent = rv.persist_dir()
+    rid = ""
+    if active == "active":
+        rid = rd("--get-id").stdout.strip()
+    print(json.dumps({"installed": installed(), "unit_enabled": enabled, "unit_active": active,
+                      "setup_done": os.path.exists(rv.MARKER), "servers": relay_state, "relay_error": relay_err,
+                      "config_persistent": persistent, "id": rid, "policy": dict(rv.POLICY)}))
+
+
+VERBS = {"status": cmd_status, "setup": cmd_setup, "apply": cmd_apply, "mount": cmd_mount, "umount": cmd_umount,
+         "restore": cmd_restore, "disable": cmd_disable, "reset": cmd_reset}
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in VERBS:
+        die("usage: victor-rustdeskv-priv " + "|".join(VERBS))
+    if os.geteuid() != 0 and "VICTOR_RUSTDESKV_TEST" not in os.environ:
+        die("must run as root (via sudo)")
+    VERBS[argv[1]]()
+
+
+if __name__ == "__main__":
+    main(sys.argv)

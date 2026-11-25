@@ -7,4 +7,6 @@ upstream project (see LICENSE) unless a file states otherwise.
 Third-party components keep their own licenses:
   llama.cpp (MIT, ggml-org), Debian packages (their respective licenses, see /usr/share/doc/*/copyright in the image),
   Ventoy (GPLv3, used unmodified as a separate tool), Kali Linux container image (various, kali.org), podman (Apache-2.0),
-  scrcpy (Apache-2.0, Genymobile/scrcpy).
+  scrcpy (Apache-2.0, Genymobile/scrcpy),
+  RustDeskV, built into the images (AGPL-3.0, rustdesk/rustdesk; Victorious93/rustdeskV is Don's fork of it). The shipped binary is the
+  pinned upstream release named in .ci/options.ini / debian-edition/versions.env; its source is at github.com/rustdesk/rustdesk.

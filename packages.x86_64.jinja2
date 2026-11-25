@@ -127,3 +127,16 @@ blueman
 # Tk runtime for the VictorLinux Phone GUI (python is already in the base list)
 tk
 {% endif %}
+
+{% if rustdeskv %}
+# RustDeskV runtime libraries (the package itself is installed offline in customize_airootfs.sh from the pinned, checksummed file)
+gtk3
+xdotool
+libxcb
+libxfixes
+alsa-lib
+libva
+libappindicator-gtk3
+gst-plugins-base
+gst-plugin-pipewire
+{% endif %}

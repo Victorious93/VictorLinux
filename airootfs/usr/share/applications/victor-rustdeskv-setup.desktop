@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RustDeskV host setup
+Comment=Choose the password that turns unattended RustDeskV access on
+Exec=sh -c 'victor-rustdeskv setup; echo; read -r -p "Press Enter to close" _'
+Icon=rustdesk
+Categories=Network;RemoteAccess;Settings;
+Terminal=true

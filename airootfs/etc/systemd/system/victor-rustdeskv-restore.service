@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore the RustDeskV setup marker from persistent storage (no-op in a temporary session)
+After=victor-boot-setup.service victor-storage.service local-fs.target
+ConditionPathExists=/usr/bin/rustdesk
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/victorlinux/victor-rustdeskv-priv restore
+
+[Install]
+WantedBy=multi-user.target

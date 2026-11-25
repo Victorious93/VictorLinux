@@ -1,0 +1,27 @@
+[Unit]
+Description=RustDeskV remote-access host (starts only after the owner has chosen a password)
+Documentation=https://github.com/Victorious93/VictorLinux/blob/main/docs/rustdeskv.md
+After=network-online.target victor-rustdeskv-restore.service
+Wants=network-online.target victor-rustdeskv-restore.service
+Conflicts=rustdesk.service
+# No default password exists. `victor-rustdeskv setup` creates this marker; without it the host does not run.
+ConditionPathExists=/var/lib/victorlinux/rustdeskv/enabled
+ConditionPathExists=/usr/bin/rustdesk
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/lib/victorlinux/victor-rustdeskv-priv mount
+ExecStart=/usr/bin/rustdesk --service
+# Fail closed: if the permanent-password-only policy cannot be confirmed, the unit stops.
+ExecStartPost=/usr/local/lib/victorlinux/victor-rustdeskv-priv apply
+ExecStop=/usr/bin/pkill -f "rustdesk --"
+ExecStopPost=-/usr/local/lib/victorlinux/victor-rustdeskv-priv umount
+KillMode=mixed
+TimeoutStartSec=90
+TimeoutStopSec=30
+User=root
+LimitNOFILE=100000
+Environment="PULSE_LATENCY_MSEC=60" "PIPEWIRE_LATENCY=1024/48000"
+
+[Install]
+WantedBy=multi-user.target
