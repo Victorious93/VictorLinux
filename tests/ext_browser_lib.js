@@ -21,8 +21,9 @@ async function withControlCenter(port, extraEnv, seed, fn) {
   assert.ok(fs.existsSync(tokenFile), 'Server startup failed: ' + output);
   await sleep(300);
   const token = fs.readFileSync(tokenFile, 'utf8').trim();
-  browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined});
-  const page = await browser.newPage({viewport: {width: 1366, height: 900}});
+  const args = (extraEnv && extraEnv.CHROME_ARGS) ? extraEnv.CHROME_ARGS.split(' ') : [];
+  browser = await chromium.launch({executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined, args});
+  const page = await browser.newPage({viewport: {width: 1366, height: 900}, permissions: args.length ? ['microphone'] : []});
   const errors = [], foreign = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('request', r => { if (!new RegExp(`^(http://127\\.0\\.0\\.1:${port}/|data:|blob:)`).test(r.url())) foreign.push(r.url()); });

@@ -700,7 +700,7 @@ def serve(args: argparse.Namespace) -> int:
     if args.ptt:
         import victorptt, victorvoice
         phones = [victorvoice.Phone(x.device_id, x.nickname, i + 1) for i, x in enumerate(reg.active())]
-        ptt = victorptt.PttSession(victorptt.VoskRecognizer(), phones, lambda: phones[0].device_id if phones else "")
+        ptt = victorptt.PttSession(victorptt.make_recognizer(args.ptt_backend, args.voice_config), phones, lambda: phones[0].device_id if phones else "")
         sinks.append(lambda ses, pcm: ptt.feed(pcm))
 
         def stdin_loop() -> None:   # "p" = button down, "r" = button up (prints the parsed command; nothing is executed here)
@@ -793,6 +793,9 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--set-default", action="store_true")
     sv.add_argument("--record", metavar="FILE.wav", help="write received audio to a WAV file (acceptance testing)")
     sv.add_argument("--ptt", action="store_true", help="offline push-to-talk on the phone audio: stdin 'p' down, 'r' up")
+    sv.add_argument("--ptt-backend", choices=("vosk", "whisper"), default="vosk",
+                    help="offline recogniser for --ptt: vosk (default) or whisper (whisper.cpp from the voice-chat settings)")
+    sv.add_argument("--voice-config", help="voice settings JSON with the whisper.cpp program/model (default: data partition config/voice.json)")
     sv.add_argument("--read-test-text", help=argparse.SUPPRESS)
     sv.add_argument("--seconds", type=float, default=0, help="stop after N seconds (0 = until Ctrl-C)")
     a = ap.parse_args(argv)
