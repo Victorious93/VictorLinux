@@ -1,0 +1,23 @@
+[Unit]
+Description=VictorLinux: owner decisions on the physical console (approve a data drive's saved credentials)
+# Runs as root on tty1 before any graphical login, so only the person at the machine can answer. Does nothing (and
+# returns at once) when the data drive offers nothing to approve.
+After=victor-storage.service victor-access.service
+Before=getty@tty1.service display-manager.service victor-pi-setup-tty.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/victorlinux/victor-owner-setup console
+ExecStopPost=/bin/systemctl --no-block start getty@tty1.service
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity
+SuccessExitStatus=0 2
+
+[Install]
+WantedBy=multi-user.target

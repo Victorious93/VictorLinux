@@ -233,7 +233,10 @@ def full(iso, model, out):
     vm = VM(iso, w, "boot2", disks=[(disk, False)], net_restrict=True, kernel=kern)
     try:
         vm.connect(); vm.sh("systemctl is-system-running --wait >/dev/null 2>&1", 240)
-        rc, o = vm.sh("passwd -S victor"); rec("PERSIST: owner credentials restored from data partition after reboot", " P " in o, o)
+        # F-10: the saved hash is NOT trusted on a fresh boot (new machine key); the owner approves it at the console
+        rc, o = vm.sh("passwd -S victor"); rec("F-10: saved owner hash is NOT applied before the owner approves the drive", " L " in o, o)
+        rc, o = vm.sh("printf 'wrong password\\n\\n' | /usr/local/lib/victorlinux/victor-owner-setup approve; passwd -S victor"); rec("F-10: wrong password at the console approves nothing", " L " in o, o)
+        rc, o = vm.sh("printf 'correct horse 42\\n' | /usr/local/lib/victorlinux/victor-owner-setup approve; passwd -S victor"); rec("PERSIST: owner credentials restored from data partition after console approval", " P " in o, o)
         rc, o = ctl(vm, "llama config"); rec("PERSIST: inference config survived reboot", '"model": "test-model.gguf"' in o and '"ctx": 2048' in o, o[:200])
         rc, o = ctl(vm, "model list"); rec("PERSIST: model survived reboot", "test-model.gguf" in o, o)
         rc, o = vm.sh("ls /run/victor/data/secrets/ /run/victor/data/logs | head; test -f /run/victor/data/settings/capabilities.json && echo caps-saved"); rec("PERSIST: API key + TLS cert + bounded log snapshot + capability record present", "api.key" in o and "tls" in o and "caps-saved" in o, o)

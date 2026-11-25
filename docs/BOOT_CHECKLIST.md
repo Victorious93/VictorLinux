@@ -286,6 +286,7 @@ Copy this and fill each cell with **pass**, **fail**, **skipped**, or **n/a**, p
 | Remote API (opt-in): no key rejected, key works | | | | | | | bind address |
 | Mesh join, status shows a 100.64.x address, key not in logs | | | | | | | Headscale version |
 | Mesh still up after reboot (persistent storage) | | | | | | | |
+| Data drive approval after reboot (Debian/Pi): the tty1 console asks for the owner password before login; a wrong password or Enter leaves the account locked and the drive as plain storage | n/a (Arch restores no password) | | | | | | Note whether the prompt appeared, and whether a wrong password was refused |
 | Hotspot: phone joins, isolated, no WAN through the PC | | | | skipped unless you try | skipped | skipped | |
 | Voice (if you brought models) | | | | | | | |
 | Image gen (if you brought `sd` + a model) | | | | | | | |
