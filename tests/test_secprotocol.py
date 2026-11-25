@@ -101,3 +101,47 @@ def test_error_to_dict_shape():
 def test_transitions_table(frm, to, ok):
     allowed = proto.TRANSITIONS.get(frm, set())
     assert (to in allowed) == ok
+
+
+# ---- sec: a bare newline must not start a second Metasploit console command -------------------------------------------
+
+def _msf(**over):
+    p = {"module_type": "auxiliary", "module_path": "scanner/portscan/tcp", "target_host": "127.0.0.1"}
+    p.update(over)
+    return {"op": "metasploit.module", "idempotency_key": "k1", "params": p}
+
+
+@pytest.mark.parametrize("params", [
+    {"options": {"PORTS": "1\nirb"}},
+    {"options": {"PORTS": "1\x1b[2J"}},
+    {"options": {"PORTS\n": "x"}},                       # `$` used to accept a trailing newline in the key
+    {"target_host": "127.0.0.1\nirb"},
+    {"payload": "generic/shell\nirb"},
+    {"module_path": "scanner/portscan/tcp\n"},
+])
+def test_metasploit_params_reject_line_breaks_and_control_characters(params):
+    with pytest.raises(proto.ProtocolError) as e:
+        proto.validate_job_submit(_msf(**params))
+    assert e.value.code == "bad_request"
+
+
+def test_idempotency_key_rejects_trailing_newline():
+    body = _msf()
+    body["idempotency_key"] = "abc\n"
+    with pytest.raises(proto.ProtocolError):
+        proto.validate_job_submit(body)
+
+
+def test_setoolkit_target_fields_reject_control_characters():
+    from secset import SUPPORTED_VECTORS
+    vec = sorted(SUPPORTED_VECTORS)[0]
+    for field in ("target_host", "target_email"):
+        with pytest.raises(proto.ProtocolError):
+            proto.validate_job_submit({"op": "setoolkit.attack", "idempotency_key": "k",
+                                       "params": {"attack_vector": vec, field: "a@b.c\nexit"}})
+
+
+def test_plain_values_still_accepted():
+    out = proto.validate_job_submit(_msf(options={"PORTS": "1-100,443", "RHOSTS": "10.0.0.0/24 10.0.1.5"},
+                                         payload="generic/shell_reverse_tcp"))
+    assert out["params"]["options"]["PORTS"] == "1-100,443"

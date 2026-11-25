@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""victor-mesh-priv: the root half of Victorious Mesh (run via `sudo -n`). Fixed verbs, strict validation.
+
+Verbs: join URL [HOSTNAME] (pre-auth key on stdin, one line), up, down, leave, set TOGGLE on|off, share-password,
+apply. It never accepts a command, path or flag from the caller, never prints the key and never stores it.
+"""
+import json
+import os
+import pwd
+import shutil
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import victormesh as vm  # noqa: E402
+import victorssh  # noqa: E402
+
+TS_UNIT = "tailscaled.service"
+SHARE_UNIT = "victor-mesh-share.service"
+TAILDROP_UNIT = "victor-mesh-taildrop.service"
+ENV_FILE = "/etc/default/victor-mesh"
+
+
+def die(msg, code=2):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def owner_ids():
+    pw = pwd.getpwnam(vm.OWNER)
+    return pw.pw_uid, pw.pw_gid, pw.pw_dir
+
+
+def run(cmd, timeout=120, check=False, **kw):
+    r = vm.run(cmd, timeout=timeout, **kw)
+    if check and r.returncode != 0:
+        die(f"{cmd[0]} {cmd[1] if len(cmd) > 1 else ''} failed: {(r.stderr or r.stdout).strip()[-400:]}")
+    return r
+
+
+def ensure_dirs(p):
+    uid, gid, _ = owner_ids()
+    # p["dir"] ends up owned by the unprivileged user, so nothing here may follow a link it plants (root chown/mkdir)
+    try:
+        dfd = vm.safefs.open_path(p["dir"], create=True)
+    except OSError as e:
+        die(f"Refusing to use {p['dir']}: {e}")
+    try:
+        vm.safefs.chown_dir(dfd, uid, gid, 0o700)   # owner reads settings/share; tailscaled.state stays root 0600
+        for d in (p["share_dir"], p["received"]):
+            name = os.path.basename(d)
+            if os.path.dirname(d) != p["dir"]:
+                die(f"Unexpected mesh folder layout: {d}")
+            try:
+                os.mkdir(name, 0o700, dir_fd=dfd)
+            except FileExistsError:
+                pass
+            try:
+                sub = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dfd)
+            except OSError as e:
+                die(f"Refusing to use {d}: {e}")
+            try:
+                vm.safefs.chown_dir(sub, uid, gid, 0o700)
+            finally:
+                os.close(sub)
+    finally:
+        os.close(dfd)
+
+
+def ssh_unit():
+    return "ssh.service" if run(["systemctl", "cat", "ssh.service"], timeout=10).returncode == 0 else "sshd.service"
+
+
+def fw(port, on):
+    """Open/close a TCP port for tailscale0 only (Debian/Pi nftables set). Arch has no firewall: the bind is the guard."""
+    op = "add" if on else "delete"
+    r = run(["nft", op, "element", *vm.NFT_SET, f"{{ {int(port)} }}"], timeout=10)
+    return r.returncode == 0
+
+
+def start_tailscaled(p):
+    exe = shutil.which("tailscaled") or ("/usr/sbin/tailscaled" if os.path.exists("/usr/sbin/tailscaled") else None)
+    if not exe or not shutil.which("tailscale"):
+        die("tailscale is not installed in this image. See docs/victorious-mesh.md.")
+    os.makedirs(vm.TS_DROPIN_DIR, exist_ok=True)
+    with open(os.path.join(vm.TS_DROPIN_DIR, "victor.conf"), "w") as f:
+        f.write(vm.tailscaled_dropin(p["state"], exe))
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "start", TS_UNIT], check=True)        # start only: never enabled on boot
+    for _ in range(30):
+        if run(["tailscale", "status", "--json"], timeout=5).returncode in (0, 1):
+            break
+        __import__("time").sleep(0.5)
+
+
+def tailscale_up(settings, key=None):
+    keyfile = None
+    try:
+        if key:
+            os.makedirs(vm.RUN, exist_ok=True)
+            fd, keyfile = tempfile.mkstemp(dir=vm.RUN, prefix=".mesh-key-")
+            with os.fdopen(fd, "w") as f:
+                f.write(key)
+            os.chmod(keyfile, 0o600)
+        r = run(["tailscale", *vm.up_args(settings, keyfile)], timeout=120)
+    finally:
+        if keyfile and os.path.exists(keyfile):
+            with open(keyfile, "r+b") as f:
+                f.write(b"\0" * max(os.path.getsize(keyfile), 1))
+            os.unlink(keyfile)
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout).strip()
+        if key:
+            msg = msg.replace(key, "***")
+        die("Could not join the mesh: " + (msg[-400:] or "tailscale up failed") +
+            "\nCheck the Headscale URL, that the key is not expired or used up, and that the key's user owns the tag.")
+
+
+def apply_extras(settings, p):
+    """Make services match the saved toggles. Called after up and after every set."""
+    st = vm.ts_status()
+    ip4 = vm.mesh_ipv4(st)
+    notes = []
+    fwd = "1" if settings["exit_node"] else "0"
+    for k in ("/proc/sys/net/ipv4/ip_forward", "/proc/sys/net/ipv6/conf/all/forwarding"):
+        try:
+            open(k, "w").write(fwd)
+        except OSError:
+            pass
+    if settings["wol"]:
+        for nic in wired_nics():
+            r = run(["ethtool", "-s", nic, "wol", "g"], timeout=10)
+            notes.append(f"Wake-on-LAN {'on' if r.returncode == 0 else 'not supported'} for {nic}")
+    with open(ENV_FILE, "w") as f:
+        f.write(f"VICTOR_MESH_BIND={ip4 or ''}\nVICTOR_MESH_DIR={p['dir']}\nVICTOR_MESH_RECEIVED={p['received']}\n")
+    if settings["taildrop"]:
+        run(["systemctl", "start", TAILDROP_UNIT])
+    else:
+        run(["systemctl", "stop", TAILDROP_UNIT])
+    if settings["share"] and ip4:
+        if not os.path.exists(p["share_auth"]):
+            new_share_password(p)
+            notes.append("A share password was made; run `victor-mesh share password` to get one you can see.")
+        fw(vm.SHARE_PORT, True)
+        run(["systemctl", "restart", SHARE_UNIT])
+        notes.append(f"Share on http://{ip4}:{vm.SHARE_PORT}/ (mesh only, read-only)")
+    else:
+        run(["systemctl", "stop", SHARE_UNIT])
+        fw(vm.SHARE_PORT, False)
+    if settings["ssh"] and ip4:
+        keys = os.path.join(owner_ids()[2], ".ssh", "authorized_keys")
+        if not victorssh.read_text(keys).strip():
+            settings["ssh"] = False
+            notes.append("Mesh SSH stays off: add an SSH public key first (Control Center > SSH).")
+        else:
+            os.makedirs(os.path.dirname(vm.SSH_DROPIN), exist_ok=True)
+            with open(vm.SSH_DROPIN, "w") as f:
+                f.write(vm.sshd_dropin(ip4))
+            run(["ssh-keygen", "-A"])
+            fw(22, True)
+            r = run(["systemctl", "restart", ssh_unit()])
+            notes.append(f"SSH on {ip4}:22 (key only)" if r.returncode == 0 else "sshd failed to start: " + r.stderr.strip()[-200:])
+    else:
+        ssh_off()
+    return notes
+
+
+def ssh_off():
+    if os.path.exists(vm.SSH_DROPIN):
+        os.unlink(vm.SSH_DROPIN)
+        if not os.path.exists("/etc/ssh/sshd_config.d/10-victor.conf"):
+            run(["systemctl", "stop", ssh_unit()])
+        else:
+            run(["systemctl", "restart", ssh_unit()])
+    fw(22, False)
+
+
+def wired_nics():
+    out = []
+    for n in sorted(os.listdir("/sys/class/net")):
+        if n == "lo" or n.startswith(("tailscale", "wl", "docker", "veth", "br", "virbr")):
+            continue
+        if os.path.exists(f"/sys/class/net/{n}/device"):
+            out.append(n)
+    return out
+
+
+def save(settings, p):
+    uid, gid, _ = owner_ids()
+    return vm.save_settings(settings, p, uid, gid)
+
+
+def cmd_join(args):
+    if len(args) not in (1, 2):
+        die("usage: join URL [HOSTNAME]  (pre-auth key on stdin)")
+    try:
+        url = vm.normalize_url(args[0])
+        host = vm.valid_hostname(args[1] if len(args) == 2 else "") or vm.default_hostname()
+        key = vm.valid_authkey(sys.stdin.readline())
+    except vm.MeshError as e:
+        die(str(e))
+    p = vm.paths()
+    old = vm.load_settings(p)
+    if old["control_url"]:
+        run(["tailscale", "logout"], timeout=30)
+    run(["systemctl", "stop", TS_UNIT])
+    if os.path.exists(p["state"]):
+        os.unlink(p["state"])                              # fresh identity for a new mesh
+    ensure_dirs(p)
+    s = dict(vm.DEFAULTS, control_url=url, hostname=host, tag=vm.tag_for(vm.edition()))
+    start_tailscaled(p)
+    tailscale_up(s, key)
+    del key
+    save(s, p)
+    notes = apply_extras(s, p)
+    print(json.dumps({"ok": True, "joined": url, "tag": s["tag"], "hostname": host, "mesh_ips": vm.mesh_ips(),
+                      "state_persistent": p["persistent"], "notes": notes}))
+
+
+def cmd_up(_a):
+    p = vm.paths()
+    s = vm.load_settings(p)
+    if not s["control_url"]:
+        die("Not joined yet. Use Join Mesh with your Headscale URL and a pre-auth key.")
+    if not os.path.exists(p["state"]):
+        die("This PC's mesh identity is gone (no persistent storage at the last join). Join again with a new pre-auth key.")
+    ensure_dirs(p)
+    start_tailscaled(p)
+    tailscale_up(s)
+    notes = apply_extras(s, p)
+    print(json.dumps({"ok": True, "mesh_ips": vm.mesh_ips(), "notes": notes}))
+
+
+def stop_all():
+    for u in (SHARE_UNIT, TAILDROP_UNIT):
+        run(["systemctl", "stop", u])
+    ssh_off()
+    fw(vm.SHARE_PORT, False)
+
+
+def cmd_down(_a):
+    stop_all()
+    run(["tailscale", "down"], timeout=30)
+    run(["systemctl", "stop", TS_UNIT])
+    print(json.dumps({"ok": True, "message": "Mesh disconnected. Settings and this PC's mesh identity are kept."}))
+
+
+def cmd_leave(_a):
+    p = vm.paths()
+    stop_all()
+    if vm.load_settings(p)["control_url"] and run(["systemctl", "is-active", TS_UNIT], timeout=10).stdout.strip() == "active":
+        run(["tailscale", "logout"], timeout=30)
+    run(["systemctl", "stop", TS_UNIT])
+    for f in (p["state"], p["settings"], p["share_auth"], os.path.join(vm.TS_DROPIN_DIR, "victor.conf"), ENV_FILE):
+        if os.path.exists(f):
+            os.unlink(f)
+    run(["systemctl", "daemon-reload"])
+    print(json.dumps({"ok": True, "message": "Left the mesh: identity and settings removed. Shared and received files are kept. "
+                      "Also delete this machine in Headscale (`headscale nodes delete`)."}))
+
+
+def cmd_set(args):
+    if len(args) != 2 or args[0].replace("-", "_") not in vm.TOGGLES or args[1] not in ("on", "off"):
+        die("usage: set exit-node|wol|taildrop|share|ssh on|off")
+    p = vm.paths()
+    s = vm.load_settings(p)
+    k, on = args[0].replace("-", "_"), args[1] == "on"
+    if not s["control_url"]:
+        die("Join a mesh first.")
+    s[k] = on
+    out = {"ok": True, k: on}
+    if k == "share" and on and not os.path.exists(p["share_auth"]):
+        out["password"] = new_share_password(p)
+        out["password_note"] = "Shown once. Any user name works. Make a new one with: victor-mesh share password"
+    running = run(["systemctl", "is-active", TS_UNIT], timeout=10).stdout.strip() == "active"
+    if k == "exit_node" and running:
+        tailscale_up(s)
+        if on:
+            out["note"] = "Approve the exit node in Headscale: headscale nodes approve-routes (or routes enable)."
+    out["notes"] = apply_extras(s, p) if running else ["Saved. It applies when the mesh is connected."]
+    if k == "wol" and not on:
+        out["notes"].append("Wake-on-LAN setting saved off; the network card keeps its current mode until reboot.")
+    save(s, p)
+    print(json.dumps(out))
+
+
+def new_share_password(p):
+    ensure_dirs(p)
+    uid, gid, _ = owner_ids()
+    pw = vm.new_password()
+    vm._write(p["share_auth"], json.dumps(vm.hash_password(pw)) + "\n", 0o600, uid, gid)
+    return pw
+
+
+def cmd_share_password(_a):
+    p = vm.paths()
+    pw = new_share_password(p)
+    if run(["systemctl", "is-active", SHARE_UNIT], timeout=10).stdout.strip() == "active":
+        run(["systemctl", "restart", SHARE_UNIT])
+    print(json.dumps({"ok": True, "password": pw, "note": "Shown once; only a hash is stored. Any user name works."}))
+
+
+def cmd_apply(_a):
+    p = vm.paths()
+    s = vm.load_settings(p)
+    print(json.dumps({"ok": True, "notes": apply_extras(s, p)}))
+
+
+VERBS = {"join": cmd_join, "up": cmd_up, "down": cmd_down, "leave": cmd_leave, "set": cmd_set,
+         "share-password": cmd_share_password, "apply": cmd_apply}
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        die("must run as root (sudo -n /usr/local/lib/victorlinux/victor-mesh-priv ...)")
+    if len(sys.argv) < 2 or sys.argv[1] not in VERBS:
+        die("verbs: " + ", ".join(VERBS))
+    VERBS[sys.argv[1]](sys.argv[2:])

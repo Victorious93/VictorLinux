@@ -14,3 +14,6 @@ adwaita-icon-theme
 libglib2.0-bin
 # Optional Bluetooth manager. Autostart is hidden so Bluetooth stays off until the owner pairs a phone.
 blueman
+# Sound for the optional offline voice chat (victor-ctl voice listen / speak)
+alsa-utils
+pipewire-audio

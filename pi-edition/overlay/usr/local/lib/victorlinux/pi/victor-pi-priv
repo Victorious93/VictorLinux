@@ -5,7 +5,9 @@ Verbs: board-detect | wifi-country CC | wifi-connect SSID (passphrase on stdin) 
        ssh-keys (keys on stdin) | restore-keys | full-name NAME | firstboot-file | mark-done | setup-status"""
 import io, json, os, pwd, subprocess, sys
 sys.path.insert(0, "/usr/local/lib/victorlinux/pi")
+sys.path.insert(0, "/usr/local/lib/victorlinux")
 import victorpi
+from victorlib import safefs     # symlink-safe writes into the owner-controlled ~/.ssh
 
 OWNER = "victor"
 RUN = "/run/victor"
@@ -110,8 +112,15 @@ def valid_keys(text):
 
 def install_keys(keys):
     uid, gid = owner(); d = f"/home/{OWNER}/.ssh"
-    os.makedirs(d, mode=0o700, exist_ok=True); os.chown(d, uid, gid)
-    write(f"{d}/authorized_keys", "\n".join(keys) + "\n", 0o600); os.chown(f"{d}/authorized_keys", uid, gid)
+    try:                         # ~/.ssh is owned by the unprivileged user: never follow a symlink or reuse a planted temp file
+        dfd = safefs.open_dir(d, uid=uid, create=True)
+        try:
+            safefs.chown_dir(dfd, uid, gid, 0o700)
+            safefs.write_file(dfd, "authorized_keys", "\n".join(keys) + "\n", uid, gid, 0o600)
+        finally:
+            os.close(dfd)
+    except OSError as e:
+        die(f"Refusing to write {d}/authorized_keys: {e}")
     if os.path.isdir(DATA_SECRETS):              # also kept on VICTORDATA so they survive reflashing the root partition
         write(f"{DATA_SECRETS}/ssh_authorized_keys", "\n".join(keys) + "\n", 0o600)
 

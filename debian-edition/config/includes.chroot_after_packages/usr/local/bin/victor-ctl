@@ -17,6 +17,48 @@ def priv(*args):
     return r.stdout.strip()
 
 
+def ssh_cmd(a):
+    """SSH for the owner account: key-only, keys kept on VICTORDATA, off by default."""
+    if a.cmd == "status":
+        try:
+            return json.loads(priv("ssh-status"))
+        except ValueError:
+            raise VictorError("unexpected ssh-status output")
+    if a.cmd == "stop":
+        return priv("ssh-stop")
+    if a.cmd == "revoke":
+        return priv("revoke")
+    live = os.path.expanduser("~/.ssh/authorized_keys")
+    keyfile = live
+    if a.keys_stdin:
+        import tempfile, victorssh
+        text = sys.stdin.read(65537)
+        try:
+            keys = victorssh.valid_keys(text)
+        except victorssh.SSHKeyError as e:
+            raise VictorError(str(e))
+        if not keys:
+            raise VictorError("Paste at least one public key line (for example from ~/.ssh/id_ed25519.pub).")
+        old = []
+        if os.path.exists(live):
+            try:
+                old = victorssh.valid_keys(open(live).read())
+            except victorssh.SSHKeyError:
+                old = []
+        merged = old + [k for k in keys if k not in old]
+        d = os.path.expanduser("~/.cache/victorlinux"); os.makedirs(d, mode=0o700, exist_ok=True)
+        fd, keyfile = tempfile.mkstemp(dir=d, prefix="ssh-keys-")
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(merged) + "\n")
+    elif not os.path.exists(live):
+        raise VictorError("No SSH keys yet. Paste your public key first.")
+    try:
+        return priv("ssh-enable", keyfile, a.bind)
+    finally:
+        if keyfile != live:
+            os.unlink(keyfile)
+
+
 def out(a, obj):
     if getattr(a, "json", False) or not isinstance(obj, str):
         print(json.dumps(obj, indent=2, default=str))
@@ -267,6 +309,12 @@ def main():
     inn["revoke"].add_argument("id")
     bt = g("bluetooth", "status", "start", "confirm", "cancel", "list", "unpair")
     bt["unpair"].add_argument("mac")
+    sh = g("ssh", "status", "enable", "stop", "revoke")
+    sh["enable"].add_argument("--bind", default="0.0.0.0", help="LAN/VPN address sshd listens on")
+    sh["enable"].add_argument("--keys-stdin", action="store_true",
+                              help="read authorized_keys lines (options allowed) from stdin; otherwise reuse saved keys")
+    from victorlib import ctl_ext
+    ext = ctl_ext.register(sp)        # optional feature groups (victorlib/ctl_ext)
     a = ap.parse_args()
     try:
         if a.grp == "storage":
@@ -347,6 +395,8 @@ def main():
             out(a, backup_cmd(a))
         elif a.grp == "docs":
             out(a, docs_cmd(a))
+        elif a.grp in ext:
+            out(a, ext[a.grp].handle(a))
         elif a.grp == "versions":
             out(a, diag.collect()["image_facts"] | diag.collect()["llama_build"])
         elif a.grp == "input":
@@ -394,6 +444,8 @@ def main():
                 out(a, json.loads(raw))
             except ValueError:
                 out(a, raw)
+        elif a.grp == "ssh":
+            out(a, ssh_cmd(a))
     except VictorError as e:
         print(f"ERROR: {e}", file=sys.stderr); sys.exit(2)
 

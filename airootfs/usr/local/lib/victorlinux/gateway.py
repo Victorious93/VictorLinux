@@ -32,6 +32,20 @@ HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", 
        "transfer-encoding", "upgrade", "host", "content-length", "authorization"}
 
 
+SWAP_WAIT_S = 180            # hold API requests this long while the Control Center switches models
+
+
+def swap_state():
+    """The Control Center writes RUN_DIR/swap.json while it switches models and removes it when the new model answers
+    (or the switch failed and the old one is back). Older than 15 minutes = stale, ignored."""
+    try:
+        with open(os.path.join(tc.RUN_DIR, "swap.json")) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return st if isinstance(st, dict) and time.time() - float(st.get("since", 0)) < 900 else None
+
+
 class State:
     last_request = time.time()
     lock = threading.Lock()
@@ -85,9 +99,61 @@ def capabilities(model_path=None):
     return caps
 
 
+def tls_per_connection(server, ctx, handshake_timeout=15):
+    """Serve TLS from a plain listening socket, doing each handshake in the connection's own thread with a timeout.
+    Wrapping the LISTENING socket (`server.socket = ctx.wrap_socket(...)`) makes accept() perform the handshake, so one
+    client that connects and sends nothing stalls the whole service for everyone (reproduced). Not used by plain HTTP."""
+    def get_request():
+        conn, addr = server.socket.accept()
+        conn.settimeout(handshake_timeout)
+        return conn, addr
+
+    orig_finish = server.finish_request
+
+    def finish_request(request, client_address):
+        try:
+            tls = ctx.wrap_socket(request, server_side=True)
+        except (OSError, ValueError):          # ssl.SSLError and socket.timeout are OSErrors; scanners are routine
+            return
+        try:
+            tls.settimeout(None)               # handler classes set their own read timeout in setup()
+            orig_finish(tls, client_address)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
+
+    orig_error = server.handle_error
+
+    def handle_error(request, client_address):
+        import sys
+        if isinstance(sys.exc_info()[1], OSError):     # resets, TLS EOF and read timeouts of scanners/phones are routine
+            return
+        orig_error(request, client_address)
+
+    server.get_request = get_request
+    server.finish_request = finish_request
+    server.handle_error = handle_error
+    return server
+
+
+def content_length(headers, limit=None):
+    """Content-Length as a non-negative int. Raises ValueError on garbage/negative (rfile.read(-1) would hang the thread)
+    and on a body larger than `limit`."""
+    raw = (headers.get("Content-Length") or "0").strip()
+    if not raw.isascii() or not raw.isdigit():
+        raise ValueError("bad Content-Length")
+    n = int(raw)
+    if limit is not None and n > limit:
+        raise ValueError("request body too large")
+    return n
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "VictorGateway"
+    timeout = 120        # idle/stalled clients are dropped; model replies are streamed OUT, never waited for on this socket
     cfg = None
 
     def log_message(self, fmt, *a):   # keep logs free of tokens/URLs with queries
@@ -130,7 +196,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(405, {"v": 1, "ok": False, "err": "bad_request"}, {"Allow": "POST"})
         if not self.cfg["tls"] and self.cfg["bind"] not in ("127.0.0.1", "::1", "localhost"):
             return self._json(403, {"v": 1, "ok": False, "err": "tls_required"})
-        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            n = content_length(self.headers, 4096)
+        except ValueError:
+            n = 0
         if not 0 < n <= 4096:
             return self._json(400, {"v": 1, "ok": False, "err": "bad_request"})
         try:
@@ -166,7 +235,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/victor/health", "/tori/health"):
             up = self._upstream_ok()
-            return self._json(200 if up else 503, {"status": "ok" if up else "model_not_running",
+            sw = swap_state()
+            return self._json(200 if up and not sw else 503, {"status": "switching_model" if sw else "ok" if up else "model_not_running",
                                                    "gateway": "ok", "auth_required": self.cfg["require_auth"]})
         if path == "/victor/pair":
             return self._pair()
@@ -199,15 +269,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ---- Ollama-compatible subset (so Ollama-only clients can use this PC) -------------------------
     # Translated onto llama-server. Deliberately NOT forwarded: tools/functions, images, model pull/push/delete/create.
     def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > self.cfg["max_body"]:
-            raise ValueError("request body too large")
+        n = content_length(self.headers, self.cfg["max_body"])
         try:
             return json.loads(self.rfile.read(n) or b"{}") if n else {}
         except ValueError:
             raise ValueError("invalid JSON body")
 
+    def _await_swap(self, limit=None):
+        """Hold the request while a model switch is in progress. True = go ahead; False = still switching."""
+        deadline = time.time() + (SWAP_WAIT_S if limit is None else limit)
+        while swap_state() is not None:
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.25)
+        return True
+
+    def _switching(self):
+        st = swap_state() or {}
+        return self._json(503, {"error": {"message": f"The model is being switched to {st.get('to') or 'another model'}. Retry in a few seconds.",
+                                          "type": "model_switching"}}, {"Retry-After": "10"})
+
     def _up(self, method, path, body=None):
+        if not self._await_swap():
+            raise OSError("model switch in progress")
         c = http.client.HTTPConnection("127.0.0.1", self.cfg["upstream_port"], timeout=600)
         c.request(method, path, body=None if body is None else json.dumps(body).encode(),
                   headers={"Authorization": "Bearer " + self.cfg["upstream_key"], "Content-Type": "application/json"})
@@ -332,14 +416,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return False
 
     def _proxy(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > self.cfg["max_body"]:
-            return self._json(413, {"error": {"message": "request body too large"}})
+        try:
+            n = content_length(self.headers, self.cfg["max_body"])
+        except ValueError as e:
+            return self._json(413 if "large" in str(e) else 400, {"error": {"message": str(e)}})
         body = self.rfile.read(n) if n else None
         hdrs = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
         hdrs["Authorization"] = "Bearer " + self.cfg["upstream_key"]
         with State.lock:
             State.last_request = time.time()
+        if not self._await_swap():
+            return self._switching()
         try:
             c = http.client.HTTPConnection("127.0.0.1", self.cfg["upstream_port"], timeout=600)
             c.request(self.command, self.path, body=body, headers=hdrs)
@@ -418,7 +505,7 @@ def main():
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(cert, key)
-        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        tls_per_connection(srv, ctx)
     sys.stderr.write(f"{tc.now()} gateway listening on {cfg['bind']}:{cfg['port']} "
                      f"tls={cfg['tls']} auth={'required' if cfg['require_auth'] else 'off (loopback only)'}\n")
     sys.stderr.flush()

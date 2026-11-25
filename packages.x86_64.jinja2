@@ -43,6 +43,7 @@ smartmontools
 pciutils
 pv
 python
+python-cryptography
 python-pip
 python-pipx
 qemu-guest-agent
@@ -56,6 +57,14 @@ usbutils
 # Bluetooth stack for optional phone-as-keyboard. The service stays disabled at boot.
 bluez
 bluez-utils
+# Optional Wi-Fi hotspot (Control Center > Hotspot). Units are never enabled; started only on request.
+hostapd
+dnsmasq
+iw
+wireless-regdb
+# Victorious Mesh: standard tailscale/tailscaled (disabled at boot; victor-mesh starts it) and ethtool for Wake-on-LAN.
+ethtool
+tailscale
 # Phone mirroring (scrcpy is GUI-only below). adb/fastboot and udev rules.
 android-tools
 android-udev
@@ -105,6 +114,12 @@ ttf-liberation
 xclip
 xorg
 xorg-xinit
+# Sound for the optional offline voice chat (microphone in the browser, spoken replies)
+alsa-utils
+pipewire
+pipewire-alsa
+pipewire-pulse
+wireplumber
 # Phone mirroring (optional at runtime; image still works if later removed)
 scrcpy
 # Optional Bluetooth manager. Autostart is not enabled; Bluetooth stays off by default.

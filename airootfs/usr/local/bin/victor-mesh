@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""victor-mesh: join this PC to your own Headscale mesh (Victorious Mesh) from a terminal. Off by default.
+
+  victor-mesh join --url https://headscale.example.com [--name my-pc]   (asks for the pre-auth key, hidden)
+  victor-mesh status [--json] | up | down | leave
+  victor-mesh set exit-node|wol|taildrop|share|ssh on|off
+  victor-mesh share list | add FILE... | remove NAME | password | serve
+  victor-mesh wake MAC [--broadcast 192.168.1.255]
+"""
+import argparse
+import getpass
+import json
+import os
+import sys
+
+sys.path.insert(0, "/usr/local/lib/victorlinux")
+import victormesh as vm  # noqa: E402
+
+PRIV = os.environ.get("VICTOR_MESH_PRIV", "/usr/local/lib/victorlinux/victor-mesh-priv")
+
+
+def priv(*args, stdin=None):
+    cmd = [PRIV, *args] if os.geteuid() == 0 else ["sudo", "-n", PRIV, *args]
+    r = vm.run(cmd, timeout=240, input=stdin)
+    if r.returncode != 0:
+        raise vm.MeshError((r.stderr or r.stdout).strip() or f"victor-mesh-priv failed ({r.returncode})")
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        return {"ok": True, "message": r.stdout.strip()}
+
+
+def status():
+    p = vm.paths()
+    s = vm.load_settings(p)
+    services = {"tailscaled": vm.unit_active("tailscaled.service"), "share": vm.unit_active("victor-mesh-share.service"),
+                "taildrop": vm.unit_active("victor-mesh-taildrop.service")}
+    st = vm.ts_status() if services["tailscaled"] else None
+    return vm.summarize(s, st, p, services)
+
+
+def show(obj, as_json):
+    if as_json or not isinstance(obj, dict):
+        print(json.dumps(obj, indent=2))
+        return
+    if "installed" in obj:
+        print(f"Mesh: {'connected' if obj['backend'] == 'Running' else ('joined, not connected' if obj['joined'] else 'not joined')}")
+        if not obj["installed"]:
+            print("  tailscale is not installed in this image")
+        for k in ("control_url", "hostname", "tag"):
+            if obj.get(k):
+                print(f"  {k.replace('_', ' ')}: {obj[k]}")
+        if obj["mesh_ips"]:
+            print("  mesh address: " + ", ".join(obj["mesh_ips"]))
+        print("  " + ", ".join(f"{k.replace('_', '-')} {'on' if v else 'off'}" for k, v in obj["toggles"].items()))
+        if obj.get("share_url"):
+            print(f"  share: {obj['share_url']} ({len(obj['share_files'])} file(s))")
+        if not obj["state_persistent"]:
+            print("  note: no persistent storage, so this PC must join again after a reboot")
+        for peer in obj["peers"]:
+            print(f"  peer {peer['name']:<24} {'online ' if peer['online'] else 'offline'} {' '.join(peer['ips'][:1])}")
+        return
+    for k, v in obj.items():
+        if k == "ok":
+            continue
+        print(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="victor-mesh", description="Victorious Mesh (your own Headscale) for VictorLinux")
+    ap.add_argument("--json", action="store_true")
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    j = sp.add_parser("join", help="join your Headscale mesh with a pre-auth key")
+    j.add_argument("--url", required=True, help="your Headscale URL, e.g. https://headscale.example.com")
+    j.add_argument("--name", default="", help="device name on the mesh (default: this hostname)")
+    j.add_argument("--key-stdin", action="store_true", help="read the pre-auth key from stdin instead of prompting")
+    sp.add_parser("status"); sp.add_parser("up"); sp.add_parser("down"); sp.add_parser("leave")
+    st = sp.add_parser("set")
+    st.add_argument("toggle", choices=["exit-node", "wol", "taildrop", "share", "ssh"])
+    st.add_argument("state", choices=["on", "off"])
+    sh = sp.add_parser("share")
+    shs = sh.add_subparsers(dest="scmd", required=True)
+    shs.add_parser("list"); shs.add_parser("password"); shs.add_parser("serve")
+    sa = shs.add_parser("add"); sa.add_argument("files", nargs="+")
+    sr = shs.add_parser("remove"); sr.add_argument("name")
+    w = sp.add_parser("wake", help="send a Wake-on-LAN packet on this PC's LAN")
+    w.add_argument("mac"); w.add_argument("--broadcast", default="255.255.255.255")
+    a = ap.parse_args()
+    try:
+        if a.cmd == "status":
+            return show(status(), a.json)
+        if a.cmd == "join":
+            url = vm.normalize_url(a.url)
+            name = vm.valid_hostname(a.name)
+            key = sys.stdin.readline() if a.key_stdin else getpass.getpass("Pre-auth key (hidden): ")
+            key = vm.valid_authkey(key)
+            res = priv("join", url, *([name] if name else []), stdin=key + "\n")
+            del key
+            return show(res, a.json)
+        if a.cmd in ("up", "down", "leave"):
+            return show(priv(a.cmd), a.json)
+        if a.cmd == "set":
+            return show(priv("set", a.toggle, a.state), a.json)
+        if a.cmd == "wake":
+            n = vm.send_wol(a.mac, a.broadcast)
+            return show({"ok": True, "sent_bytes": n, "note": "Reaches machines on this PC's own LAN only."}, a.json)
+        p = vm.paths()
+        if a.scmd == "list":
+            return show({"files": vm.list_share(p["share_dir"])} if a.json else
+                        {"files": [f"{f['name']} ({vm.human(f['size'])})" for f in vm.list_share(p["share_dir"])] or ["(none)"]}, a.json)
+        if a.scmd == "add":
+            return show({"added": [vm.share_add(p["share_dir"], os.path.abspath(f)) for f in a.files]}, a.json)
+        if a.scmd == "remove":
+            vm.share_remove(p["share_dir"], a.name)
+            return show({"removed": a.name}, a.json)
+        if a.scmd == "password":
+            return show(priv("share-password"), a.json)
+        if a.scmd == "serve":                       # run by victor-mesh-share.service as the owner account
+            bind = os.environ.get("VICTOR_MESH_BIND", "")
+            rec = json.load(open(p["share_auth"]))
+            srv = vm.make_server(bind, vm.SHARE_PORT, p["share_dir"], rec)
+            print(f"serving {p['share_dir']} read-only on http://{bind}:{vm.SHARE_PORT}/", flush=True)
+            srv.serve_forever()
+    except (vm.MeshError, OSError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

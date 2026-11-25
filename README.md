@@ -20,7 +20,7 @@ Works on its own; fleet integration (droidcommand-AI) is optional
 VictorLinux boots a PC from a USB drive, or from an ISO exposed by [Victorious Flash](https://github.com/Victorious93/victorious-flash) on a supported rooted Android phone.
 Inference runs on the **PC's** hardware, with no telemetry, no automatic downloads and no cloud fallback.
 
-[Storage](#use-the-storage-you-already-own) · [Install](#install--download) · [Build](#build-from-source) · [Editions](#choose-an-edition) · [Boot media](#boot-media) · [Capacity & filesystems](#capacity-and-filesystems) · [Troubleshooting](#troubleshooting) · [Docs](#documentation) · [Status](#status-and-testing)
+[Storage](#use-the-storage-you-already-own) · [Install](#install--download) · [Build](#build-from-source) · [Editions](#choose-an-edition) · [Boot media](#boot-media) · [Capacity & filesystems](#capacity-and-filesystems) · [Troubleshooting](#troubleshooting) · [Manual](docs/MANUAL.md) · [Docs](#documentation) · [Status](#status-and-testing)
 
 ## Features
 
@@ -34,6 +34,7 @@ Inference runs on the **PC's** hardware, with no telemetry, no automatic downloa
 | **Fleet** | Optional coordination of 3–4 phones ([fleet integration](docs/fleet-integration.md)); off until you turn it on |
 | **Phone mirroring** | Optional **VictorLinux Phone** Tk app (`victor-phone-gui`) on GUI builds, plus `victor-phone-headless` (adb/scrcpy CLI) on every profile, to mirror and control a USB-connected Android phone, with audio and recording. The image still builds if scrcpy is missing ([notes](docs/phone-mirroring.md)) |
 | **Phone as keyboard** | Optional Bluetooth pairing and a Wi-Fi input service so [Victorious Keyboard](https://github.com/Victorious93/Victorious-Keyboard) can type and move the pointer on this PC. Both stay off until you turn them on. USB HID from the phone needs no PC software ([notes](docs/phone-as-keyboard.md), [protocol](docs/VICTOR_INPUT_PROTOCOL.md)) |
+| **Victorious Mesh** | Optional: join your own Headscale with standard tailscale (off by default) from the Control Center or `victor-mesh` on headless and Pi builds. Exit node, Wake-on-LAN, Taildrop, SSH over the mesh only, and a read-only file share on port 8090 that the [Victorious Mesh](https://github.com/Victorious93/victorious-mesh) app can open ([notes](docs/victorious-mesh.md)) |
 
 ## Screenshots
 
@@ -181,9 +182,10 @@ Import a model with `victor-model-import FILE.gguf` (or `--to-storage` for a cho
 
 ## Documentation
 
+[User manual](docs/MANUAL.md) · [Boot checklist](docs/BOOT_CHECKLIST.md) · [Security audit](docs/SECURITY_AUDIT.md) ·
 [Storage](docs/storage.md) · [Boot media / USB](docs/usb.md) · [Build](docs/build.md) · [Hardware & models](docs/hardware-and-models.md) · [AMD GPU](docs/amd-gpu.md) · [Remote access](docs/remote-access.md) ·
 [Security](docs/security.md) · [Maintenance](docs/maintenance.md) · [Fleet integration](docs/fleet-integration.md) · [Companion API](docs/companion-api.md) · [Flash companion changes](docs/flash-companion-changes.md) ·
-[Phone mirroring](docs/phone-mirroring.md) · [Phone as keyboard](docs/phone-as-keyboard.md) · [Debian edition](debian-edition/README.md) · [Raspberry Pi edition](docs/raspberry-pi.md)
+[Phone mirroring](docs/phone-mirroring.md) · [Phone as keyboard](docs/phone-as-keyboard.md) · [Victorious Mesh](docs/victorious-mesh.md) · [Debian edition](debian-edition/README.md) · [Raspberry Pi edition](docs/raspberry-pi.md)
 [Fleet integration plan](docs/FLEET_INTEGRATION_PLAN.md) · [Clients](docs/clients.md) · [Security backend (SET/Metasploit)](docs/security-backend.md)
 
 ## Status and testing
@@ -213,6 +215,14 @@ node tests/browser_ui.js
 Implementation directory `/usr/local/lib/victorlinux`; account `victor`; cache `$XDG_CACHE_HOME/victorlinux`. Developer overrides: `VICTOR_DATA`, `VICTOR_RUN_DIR`, `VICTOR_LLAMA_ROOT`, `VICTOR_CC_PORT`, `VICTOR_PRIV`, `VICTOR_VOL_BASE`.
 Public gateway routes are `/victor/health` and `/victor/capabilities`; the `/tori/` routes remain compatibility aliases. Existing data (`TORIDATA`, `tori/`) is reused without relabelling or moving it.
 Some build metadata still names the former repository URL; this repository is [Victorious93/VictorLinux](https://github.com/Victorious93/VictorLinux).
+
+## Victorious fleet
+
+VictorLinux is part of the [Victorious Framework](https://victorious-framework.pages.dev), a family of Android and PC tools by Don Victor. **It works standalone; fleet integrations are optional.** Related: [droidcommand-AI](https://github.com/Victorious93/droidcommand-AI), [victorious-flash](https://github.com/Victorious93/victorious-flash), [VictorSuite](https://github.com/Victorious93/VictorSuite), [Victorious-Keyboard](https://github.com/Victorious93/Victorious-Keyboard). The roster is in [victorious-fleet](https://github.com/Victorious93/victorious-fleet) and live status is in [fleet-manifest](https://github.com/Victorious93/fleet-manifest).
+
+## Contributing
+
+Issues and pull requests are welcome. Please describe what you changed and why, and keep documentation accurate to the code — do not invent features, builds, or test results.
 
 ## License
 

@@ -82,6 +82,7 @@ H="$STAGE/hooks"; mkdir -p "$H"
 cp "$HERE/hooks/10-pi-config.sh" "$H/10-pi-config.sh"
 [ "$PI_LLAMACPP" = 1 ] && cp "$HERE/hooks/20-llamacpp-cpu.sh" "$H/20-llamacpp-cpu.sh"
 cp "$DEB/config/hooks/live/0250-optional-scrcpy.hook.chroot" "$H/30-optional-scrcpy.sh"
+cp "$DEB/config/hooks/live/0260-optional-tailscale.hook.chroot" "$H/35-optional-tailscale.sh"   # Victorious Mesh (off by default)
 cp "$HERE/hooks/90-pi-verify.sh" "$H/90-pi-verify.sh"
 cp "$DEB/config/hooks/live/9999-cleanup.hook.chroot" "$H/99-cleanup.sh"
 chmod 0755 "$H"/*.sh

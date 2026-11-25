@@ -52,6 +52,43 @@ class VoskRecognizer:
         return r.get("text", ""), conf
 
 
+def _voice_module():
+    try:
+        import voice                      # Arch: /usr/local/lib/victorlinux/voice.py
+    except ImportError:
+        from victorlib import voice       # Debian: victorlib/voice.py
+    return voice
+
+
+def _default_voice_config() -> str | None:
+    try:
+        import victorcommon as tc                     # Arch
+        return tc.data_path("config", "voice.json")
+    except ImportError:
+        try:
+            from victorlib.common import data_path    # Debian
+            return data_path("config", "voice.json")
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def make_recognizer(backend: str = "vosk", voice_config: str | None = None) -> Recognizer:
+    """Pick the offline recogniser for push-to-talk: Vosk (default) or whisper.cpp (the voice-chat setup is reused:
+    same program and ggml model the owner picked in Control Center > Voice). Never downloads anything."""
+    if backend == "vosk":
+        return VoskRecognizer()
+    if backend == "whisper":
+        voice = _voice_module()
+        cfg = voice.load(voice_config or _default_voice_config() or "")
+        try:
+            return voice.WhisperRecognizer(cfg)
+        except voice.VoiceError as e:
+            raise RecognizerMissing(str(e)) from e
+    raise ValueError(f"unknown recogniser backend: {backend}")
+
+
 class PttSession:
     MAX_BYTES = 16000 * 2 * 15                      # 15 s utterance cap
 

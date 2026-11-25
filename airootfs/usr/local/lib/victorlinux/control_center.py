@@ -36,6 +36,8 @@ import docchat  # noqa: E402
 import pccheck  # noqa: E402
 import modellib  # noqa: E402
 import victorinput  # noqa: E402
+import cc_ext  # noqa: E402
+import autotune  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRIV = os.environ.get("VICTOR_PRIV", "/usr/local/lib/victorlinux/victor-priv")
@@ -504,13 +506,33 @@ class App:
         elif ngl < 0:
             ngl = hostplan.plan_layers(est, dev, ctx)
         threads = int(settings.get("threads") or 0) or hostplan.default_threads()
-        return {"backend": backend, "reason": reason, "model": model, "estimate": est, "fit": fit,
+        tuned = self.autotune_overrides(settings, model, backend, gl, ram, ctx)
+        if tuned:                                   # this PC's saved benchmark, only where the owner left "automatic"
+            ngl, threads = (tuned.get("ngl", ngl) if backend != "cpu" else 0), tuned.get("threads", threads)
+            if tuned.get("ctx") and tuned["ctx"] != ctx:
+                ctx = tuned["ctx"]
+                est = tc.estimate_memory(model, ctx)
+                ctx_note = "Context from this PC's saved benchmark profile (never above what fits now)."
+        return {"backend": backend, "reason": reason, "model": model, "estimate": est, "fit": fit, "tuned": tuned,
                 "ngl": ngl, "ctx": ctx, "ctx_note": ctx_note, "threads": threads,
                 "device": {k: dev[k] for k in ("kind", "budget", "free", "ambiguous", "notes")} |
                           {"name": (dev["device"] or {}).get("name"), "index": dev.get("index"), "others": len(dev["others"])},
                 "binary": tc.backends()[backend]}
 
-    def start_llm(self, settings, force=False):
+    def machine_id(self, gl=None, ram=None):
+        gl = tc.gpus() if gl is None else gl
+        ram = tc.ram_info() if ram is None else ram
+        return autotune.machine_id(model_advisor.cpu_info().get("name"), [g.get("pci_id") or g.get("name") for g in gl], ram.get("total"))
+
+    def autotune_overrides(self, settings, model, backend, gl, ram, ctx):
+        if not settings.get("autotune_apply", True) or not tc.data_path("config"):
+            return {}
+        prof = autotune.Profiles(tc.data_path("config", "autotune.json")).get(self.machine_id(gl, ram), autotune.model_key(model))
+        if not prof or prof.get("backend") != backend:
+            return {}
+        return autotune.apply(prof, settings.get("gpu_layers", -1), settings.get("threads", 0), settings.get("ctx_auto", True), ctx)
+
+    def start_llm(self, settings, force=False, keep_gateway=False):
         with self.lock:
             if self.llm.running():
                 return {"ok": True, "message": "Already running."}
@@ -551,7 +573,8 @@ class App:
         time.sleep(1.5)
         if not self.llm.running():
             return {"ok": False, "error": "llama-server exited immediately. See the log below.", "log": self.tail("llama", 40)}
-        gw = self.start_gateway(settings)
+        # a model switch keeps the running gateway (and its open client connections); a cold start (re)starts it
+        gw = {"ok": True} if keep_gateway and self.gw.running() else self.start_gateway(settings)
         if not gw.get("ok"):
             return {"ok": False, "error": "Model started but the API gateway did not: " + gw.get("error", "unknown"),
                     "log": self.tail("gateway", 20)}
@@ -936,6 +959,63 @@ class App:
         st["firewall_note"] = victorinput.firewall_note(st.get("bind") or "0.0.0.0", st.get("port") or victorinput.DEFAULT_PORT)
         return st
 
+    # ------------------------------------------------------------ mesh --
+    def mesh_priv(self, args, stdin=None, timeout=240):
+        exe = os.environ.get("VICTOR_MESH_PRIV", "/usr/local/lib/victorlinux/victor-mesh-priv")
+        try:
+            r = subprocess.run(["sudo", "-n", exe] + args, input=stdin, capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return 1, str(e)
+        return r.returncode, (r.stdout if r.returncode == 0 else (r.stderr or r.stdout)).strip()
+
+    def mesh_status(self):
+        import victormesh as vm
+        p = vm.paths()
+        services = {"tailscaled": vm.unit_active("tailscaled.service"), "share": vm.unit_active("victor-mesh-share.service"),
+                    "taildrop": vm.unit_active("victor-mesh-taildrop.service")}
+        st = vm.ts_status() if services["tailscaled"] else None
+        out = vm.summarize(vm.load_settings(p), st, p, services)
+        out["edition_tag"] = vm.tag_for(vm.edition())
+        return out
+
+    def mesh_action(self, b):
+        """Join Mesh screen. The pre-auth key goes to the root helper on stdin once; it is never stored or echoed."""
+        import victormesh as vm
+        act = b.get("action")
+        if act == "status":
+            return 200, self.mesh_status()
+        if act == "join":
+            try:
+                url = vm.normalize_url(str(b.get("url", "")))
+                name = vm.valid_hostname(str(b.get("name", "")))
+                key = vm.valid_authkey(str(b.get("key", "")))
+            except vm.MeshError as e:
+                return 400, {"error": str(e)}
+            rc, out = self.mesh_priv(["join", url] + ([name] if name else []), stdin=key + "\n")
+            out = out.replace(key, "***")
+            del key
+        elif act in ("up", "down", "leave", "share-password"):
+            rc, out = self.mesh_priv([act])
+        elif act == "set":
+            t, v = str(b.get("toggle", "")), "on" if b.get("on") else "off"
+            if t not in ("exit-node", "wol", "taildrop", "share", "ssh"):
+                return 400, {"error": "unknown mesh setting"}
+            rc, out = self.mesh_priv(["set", t, v])
+        elif act == "share-remove":
+            try:
+                vm.share_remove(vm.paths()["share_dir"], str(b.get("name", "")))
+            except (vm.MeshError, OSError) as e:
+                return 400, {"error": str(e)}
+            return 200, {"ok": True}
+        else:
+            return 400, {"error": "unknown mesh action"}
+        if rc != 0:
+            return 400, {"error": out or "victor-mesh-priv failed"}
+        try:
+            return 200, json.loads(out)
+        except ValueError:
+            return 200, {"ok": True, "message": out}
+
     def input_action(self, b):
         act = b.get("action")
         root = os.environ.get("VICTOR_INPUT_DIR") or tc.data_path("input") or victorinput.default_state_dir()
@@ -1146,7 +1226,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _auth(self):
         t = self.headers.get("X-Victor-Token", "")
-        return hmac.compare_digest(t, APP.token)
+        return hmac.compare_digest(t.encode("utf-8", "replace"), APP.token.encode())
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -1166,7 +1246,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             nonce = pysecrets.token_urlsafe(16)
             with open(os.path.join(HERE, "web", "index.html"), "rb") as f:
                 page = f.read().replace(b"<script>", b'<script nonce="' + nonce.encode() + b'">')
+            html, scripts = cc_ext.web_parts()          # optional feature screens (web/ext); same-origin scripts only
+            page = page.replace(b"<!--VICTOR-EXT-SECTIONS-->", html.encode()).replace(
+                b"<!--VICTOR-EXT-SCRIPTS-->", "".join(f'<script src="/ext/{n}"></script>' for n in scripts).encode())
             return self._send(200, page, "text/html; charset=utf-8", nonce=nonce)
+        if u.path.startswith("/ext/"):
+            js = cc_ext.read_js(u.path[5:])
+            return self._send(200, js, "text/javascript; charset=utf-8") if js is not None else self._send(404, {"error": "not found"})
         if not u.path.startswith("/api/"):
             return self._send(404, {"error": "not found"})
         if not self._auth():
@@ -1255,6 +1341,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 j = json.loads(out)
                 j["summary"] = tc.storage_status()          # same dictionary `victor-storage status --json` prints
                 return self._send(200, j)
+            r = cc_ext.dispatch(APP, "GET", u.path, q)
+            if r is not None:
+                return self._send(*r)
         except tc.GGUFError as e:
             return self._send(400, {"error": f"Invalid GGUF: {e}"})
         except (KeyError, ValueError) as e:
@@ -1394,6 +1483,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if p == "/api/bluetooth":
                 code, payload = APP.bluetooth_action(b)
                 return self._send(code, payload)
+            if p == "/api/mesh":
+                code, payload = APP.mesh_action(b)
+                return self._send(code, payload)
             if p == "/api/ssh":
                 act = b.get("action")
                 if act == "add-key":
@@ -1413,6 +1505,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._send(400, {"error": "bad action"})
                 rc, out = APP.priv(["power", act])
                 return self._send(200, {"ok": rc == 0, "message": out})
+            r = cc_ext.dispatch(APP, "POST", p, b)
+            if r is not None:
+                return self._send(*r)
         except tc.GGUFError as e:
             return self._send(400, {"error": f"Invalid GGUF: {e}"})
         except (KeyError, ValueError, RuntimeError) as e:
@@ -1496,10 +1591,12 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def main():
     global APP
     APP = App()
+    cc_ext.load()
     srv = Server(("127.0.0.1", CC_PORT), Handler)
     print(f"VictorLinux Control Center on http://127.0.0.1:{CC_PORT}/ (token in {TOKEN_FILE})", flush=True)
 
     def bye(*_):
+        cc_ext.shutdown(APP)
         APP.stop_llm()
         APP.stop(APP.emb)
         for p in APP.svc.values():

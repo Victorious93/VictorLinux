@@ -101,7 +101,7 @@ class DraftHub:
         r = self._row(p["draft_id"])
         if r["device_id"] != dev["id"]:
             raise ProtocolError("unauthorized", "that draft belongs to another device")
-        if p.get("content_hash") and not hmac.compare_digest(p["content_hash"], r["content_hash"]):
+        if p.get("content_hash") and not hmac.compare_digest(str(p["content_hash"]).encode(), str(r["content_hash"]).encode()):
             raise ProtocolError("bad_request", "content hash mismatch: the phone is reporting on different content")
         cur, new = r["state"], p["state"]
         if cur in DRAFT_FINAL:

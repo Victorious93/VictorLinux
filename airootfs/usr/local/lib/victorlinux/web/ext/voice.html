@@ -1,0 +1,17 @@
+<section id="t-voice" data-tab="voice" data-icon="chat" data-label="Voice">
+ <style>#voLog{display:flex;flex-direction:column;gap:10px;max-height:380px;overflow:auto}#voLog .msg{padding:10px 14px;border-radius:16px;border:1px solid var(--bd);white-space:pre-wrap;overflow-wrap:anywhere;max-width:88%}#voLog .user{align-self:flex-end;background:#00e5ff14;border-color:#00e5ff55}#voLog .assistant{align-self:flex-start;background:var(--s2);border-color:#ff2bd640}#voTalk{min-width:180px;font-size:1.05em}#voTalk.rec{background:#ff2bd6;color:#0b0f1a;border-color:#ff2bd6}#voMeter{height:8px;border-radius:8px;background:var(--s2);overflow:hidden;max-width:360px}#voMeter i{display:block;height:100%;width:0;background:linear-gradient(90deg,#00e5ff,#ff2bd6)}</style>
+ <div class="hero"><div><div class="eyebrow">Offline speech</div><h2>Voice chat. <em>Nothing leaves this PC.</em></h2><p>Speak to your local model and hear the answer. Speech recognition (whisper.cpp) and the voice (Piper) run on this computer with files you provide. Off by default; recordings are never saved.</p></div><span class="hero-badge" id="voBadge">● Off</span></div>
+ <div id="voWarn"></div>
+ <div class="card"><h2><svg><use href="#i-chat"/></svg>Talk</h2>
+  <div class="row"><button class="b" id="voTalk">● Start talking</button><label><input type="checkbox" id="voHands"> Hands-free (start when a wake word is detected)</label></div>
+  <div id="voMeter" aria-hidden="true"><i></i></div><p class="mut" id="voHint">Press the button, speak, press again to send.</p>
+  <div id="voLog" aria-live="polite"></div></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Setup</h2>
+  <p class="mut">Copy a whisper.cpp model (<code>ggml-*.bin</code>) and optionally a Piper voice (<code>*.onnx</code> with its <code>.onnx.json</code>) into <code id="voDir">the voice folder</code>. Nothing is downloaded for you.</p>
+  <div id="voMissing"></div>
+  <div class="row"><label><input type="checkbox" id="voOn"> Voice chat on</label><label><input type="checkbox" id="voSpeak"> Speak replies</label></div>
+  <div class="row"><div><label for="voStt">Speech-to-text model</label><select id="voStt"></select></div><div><label for="voTts">Voice (Piper)</label><select id="voTts"></select></div></div>
+  <div class="row"><div><label for="voLang">Language</label><input id="voLang" size="5"></div><div><label for="voMax">Max recording (s)</label><input id="voMax" type="number" min="3" max="24"></div>
+   <div><label for="voSttBin">whisper.cpp program (optional full path)</label><input id="voSttBin" placeholder="auto: whisper-cli"></div><div><label for="voTtsBin">Piper program (optional full path)</label><input id="voTtsBin" placeholder="auto: piper"></div></div>
+  <div class="row"><button class="b" id="voSave">Save</button><button class="b s" id="voTest">Test voice</button></div></div>
+</section>

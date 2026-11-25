@@ -1,2 +1,3 @@
 # Only the validated helper; it implements a fixed list of sub-commands (storage mount, SSH keys, power).
 victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-priv *
+victor ALL=(root) NOPASSWD: /usr/local/lib/victorlinux/victor-mesh-priv *

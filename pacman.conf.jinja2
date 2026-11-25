@@ -6,6 +6,8 @@
 HoldPkg     = pacman glibc
 Architecture = auto
 ParallelDownloads = 5
+# the Arch Linux Archive can be slow or throttled from CI runners; do not abort on the low-speed timeout
+DisableDownloadTimeout
 SigLevel    = Required DatabaseOptional
 LocalFileSigLevel = Optional
 

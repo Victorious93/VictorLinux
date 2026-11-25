@@ -1,0 +1,21 @@
+<section id="t-imagegen" data-tab="imagegen" data-icon="chip" data-label="Images">
+ <style>#igOut img{max-width:100%;border-radius:14px;border:1px solid #00e5ff55;background:#0b0f1a}#igBar{height:8px;border-radius:8px;background:var(--s2);overflow:hidden;max-width:420px}#igBar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#00e5ff,#ff2bd6)}#igPrompt{width:100%;min-height:70px}</style>
+ <div class="hero"><div><div class="eyebrow">Offline pictures</div><h2>Image generation. <em>Nothing leaves this PC.</em></h2><p>Describe a picture and stable-diffusion.cpp draws it on this computer, with a program and model you provide. Off by default; nothing is downloaded for you.</p></div><span class="hero-badge" id="igBadge">● Off</span></div>
+ <div id="igWarn"></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Draw</h2>
+  <label for="igPrompt">Describe the picture</label><textarea id="igPrompt" maxlength="1000"></textarea>
+  <div class="row"><div><label for="igNeg">Avoid (optional)</label><input id="igNeg" size="40" maxlength="1000"></div>
+   <div><label for="igW">Width</label><select id="igW"></select></div><div><label for="igH">Height</label><select id="igH"></select></div>
+   <div><label for="igSteps">Steps</label><input id="igSteps" type="number" min="1" max="60" value="20" style="width:70px"></div>
+   <div><label for="igCfg">Guidance</label><input id="igCfg" type="number" min="1" max="20" step="0.5" value="7" style="width:70px"></div>
+   <div><label for="igSeed">Seed (-1 = random)</label><input id="igSeed" type="number" value="-1" style="width:110px"></div></div>
+  <div class="row"><button class="b" id="igGo">Draw</button><button class="b d" id="igCancel" disabled>Cancel</button></div>
+  <div id="igBar" aria-hidden="true"><i></i></div><p class="mut" id="igMsg">On a CPU a 512x512 picture can take several minutes.</p>
+  <div id="igOut" aria-live="polite"></div></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Setup</h2>
+  <p class="mut">Copy a stable-diffusion.cpp build (<code>sd-cli</code> or <code>sd</code>) onto this PC and a model (<code>.gguf</code>, <code>.safetensors</code> or <code>.ckpt</code>) into <code id="igDir">the image-models folder</code>. Pictures are saved next to it in <code>images/out</code>.</p>
+  <div id="igMissing"></div>
+  <div class="row"><label><input type="checkbox" id="igOn"> Image generation on</label></div>
+  <div class="row"><div><label for="igModel">Model</label><select id="igModel"></select></div><div><label for="igBin">stable-diffusion.cpp program (optional full path)</label><input id="igBin" placeholder="auto: sd-cli or sd"></div></div>
+  <div class="row"><button class="b" id="igSave">Save</button></div></div>
+</section>
