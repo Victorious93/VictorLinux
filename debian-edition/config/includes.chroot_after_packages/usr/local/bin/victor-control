@@ -117,7 +117,7 @@ class App(tk.Tk):
             ttk.Label(card, textvariable=sub, style="TileSub.TLabel", wraplength=140).pack(anchor="w")
             self.tiles[key] = (v, sub)
         self.nb = ttk.Notebook(self); self.nb.pack(fill="both", expand=True, padx=18, pady=12)
-        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_ssh(); self.tab_mesh(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_diag()
+        self.tab_status(); self.tab_models(); self.tab_remote(); self.tab_ssh(); self.tab_phone(); self.tab_mic(); self.tab_kali(); self.tab_fleet(); self.tab_storage(); self.tab_docs(); self.tab_diag()
         self.after(500, self.refresh)
 
     # ---- helpers
