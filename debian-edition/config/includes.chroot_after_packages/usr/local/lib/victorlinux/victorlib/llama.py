@@ -5,7 +5,7 @@ from . import hw, models
 
 UNIT = "victor-llama"
 DEFAULTS = {"model": "", "backend": "auto", "ctx": 4096, "mem_limit_gb": 0.0, "port": 8080, "bind": "127.0.0.1",
-            "parallel": 1, "cache_ram_mb": "auto", "sleep_idle_minutes": 15, "jinja": False, "threads": 0,
+            "parallel": 1, "cache_ram_mb": "auto", "sleep_idle_minutes": 15, "jinja": False, "threads": 0, "autotune_apply": True,
             "remote": {"enabled": False, "tls": True, "vpn_plain_http_ack": False}}
 FORBIDDEN_FLAGS = ("--tools", "--webui-mcp-proxy", "--ui-mcp-proxy", "--mcp-servers", "--models-dir")
 
@@ -192,6 +192,17 @@ def llm_disabled_reason():
         return None
 
 
+def tuned_threads(c, backend, model_path):
+    """Thread count from `victor-ctl tune run` for this PC + model + backend, or None."""
+    if int(c.get("threads") or 0) or not c.get("autotune_apply", True):
+        return None
+    from . import autotune
+    prof = autotune.Profiles(settings_file("autotune.json")).get(hw.machine_id(), autotune.model_key(model_path))
+    if not prof or prof.get("accelerated") != bool(backend["accelerated"]):
+        return None
+    return int(prof["threads"])
+
+
 def start():
     why = llm_disabled_reason()
     if why:
@@ -213,6 +224,9 @@ def start():
     if c["backend"] == "vulkan" and not backend["accelerated"]:
         raise VictorError("Vulkan was requested but no hardware Vulkan GPU is usable: " + backend["reason"])
     limit, warn = preflight(c, backend, info["size"])
+    tuned = tuned_threads(c, backend, mp)
+    if tuned:                       # this PC's saved benchmark; only when threads are on automatic (0)
+        c = dict(c, threads=tuned)
     ip = ipaddress.ip_address(c["bind"])
     remote = not ip.is_loopback
     key_file = ensure_key() if remote else None

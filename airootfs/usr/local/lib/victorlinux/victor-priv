@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import victorstorage as vs  # noqa: E402
 import diskhealth  # noqa: E402
 import victorssh  # noqa: E402
+import hotspot  # noqa: E402
 
 RUN = "/run/victor"
 STATE = f"{RUN}/persist.json"
@@ -599,11 +600,70 @@ def cmd_bt_unpair(a):
     _bt(["unpair", a[0]])
 
 
+HOTSPOT_DIR = f"{RUN}/hotspot"
+HOTSPOT_UNITS = ("victor-hotspot-ap", "victor-hotspot-dhcp")
+
+
+def wifi_ifaces():
+    r = run(["iw", "dev"])
+    return hotspot.parse_iw_dev(r.stdout) if r.returncode == 0 else []
+
+
+def cmd_hotspot_start(_a):
+    """Isolated access point: hostapd + DHCP-only dnsmasq on one Wi-Fi interface. Settings (JSON) come on stdin and are
+    re-validated here; no forwarding/NAT is set up, so joined devices reach only this PC."""
+    try:
+        c = hotspot.validate(json.loads(sys.stdin.read() or "{}"))
+    except (ValueError, hotspot.HotspotError) as e:
+        die(f"bad hotspot settings: {e}")
+    ifaces = wifi_ifaces()
+    iface = c["iface"] or (ifaces[0] if ifaces else "")
+    if iface not in ifaces:
+        die("No Wi-Fi interface found." if not ifaces else f"{iface} is not a Wi-Fi interface.")
+    cmd_hotspot_stop([])
+    os.makedirs(HOTSPOT_DIR, mode=0o700, exist_ok=True)
+    for name, text in (("hostapd.conf", hotspot.hostapd_conf(iface, c)), ("dnsmasq.conf", hotspot.dnsmasq_conf(iface))):
+        fd = os.open(f"{HOTSPOT_DIR}/{name}", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+    run(["rfkill", "unblock", "wifi"])
+    for cmd in (["ip", "link", "set", iface, "down"], ["ip", "addr", "flush", "dev", iface], ["ip", "link", "set", iface, "up"],
+                ["ip", "addr", "add", f"{hotspot.ADDR}/{hotspot.PREFIX}", "dev", iface]):
+        r = run(cmd)
+        if r.returncode:
+            die(f"{' '.join(cmd[:3])} failed: {r.stderr.strip()}")
+    for unit, cmd in ((HOTSPOT_UNITS[0], ["hostapd", f"{HOTSPOT_DIR}/hostapd.conf"]),
+                      (HOTSPOT_UNITS[1], ["dnsmasq", "-k", "-C", f"{HOTSPOT_DIR}/dnsmasq.conf"])):
+        r = run(["systemd-run", f"--unit={unit}", "--collect", "--property=Restart=no", *cmd])
+        if r.returncode:
+            cmd_hotspot_stop([])
+            die(f"{cmd[0]} could not start: {r.stderr.strip()}")
+    print(json.dumps({"ok": True, "iface": iface, "address": hotspot.ADDR}))
+
+
+def cmd_hotspot_stop(_a):
+    for unit in HOTSPOT_UNITS:
+        run(["systemctl", "stop", unit])
+    try:
+        with open(f"{HOTSPOT_DIR}/hostapd.conf") as f:
+            m = re.search(r"^interface=(\S+)$", f.read(), re.M)
+        if m and hotspot.IFACE_RE.fullmatch(m.group(1)):
+            run(["ip", "addr", "del", f"{hotspot.ADDR}/{hotspot.PREFIX}", "dev", m.group(1)])
+    except OSError:
+        pass
+    for name in ("hostapd.conf", "dnsmasq.conf"):
+        try:
+            os.unlink(f"{HOTSPOT_DIR}/{name}")
+        except OSError:
+            pass
+
+
 COMMANDS = {"list-storage": cmd_list_storage, "persist-mount": cmd_persist_mount, "persist-auto": cmd_persist_auto,
             "persist-temp": cmd_persist_temp, "mount-ro": cmd_mount_ro, "volume-mount": cmd_volume_mount,
             "volume-umount": cmd_volume_umount, "dest-prepare": cmd_dest_prepare, "dest-apply": cmd_dest_apply, "ssh-status": cmd_ssh_status,
             "ssh-add-key": cmd_ssh_add_key, "ssh-enable": cmd_ssh_enable, "ssh-disable": cmd_ssh_disable,
-            "ssh-reset": cmd_ssh_reset, "power": cmd_power, "smart": cmd_smart, "input-enable": cmd_input_enable, "input-disable": cmd_input_disable, "input-status": cmd_input_status, "bt-start": cmd_bt_start, "bt-confirm": cmd_bt_confirm, "bt-cancel": cmd_bt_cancel, "bt-status": cmd_bt_status, "bt-list": cmd_bt_list, "bt-unpair": cmd_bt_unpair}
+            "ssh-reset": cmd_ssh_reset, "power": cmd_power, "smart": cmd_smart, "input-enable": cmd_input_enable, "input-disable": cmd_input_disable, "input-status": cmd_input_status, "bt-start": cmd_bt_start, "bt-confirm": cmd_bt_confirm, "bt-cancel": cmd_bt_cancel, "bt-status": cmd_bt_status, "bt-list": cmd_bt_list, "bt-unpair": cmd_bt_unpair,
+            "hotspot-start": cmd_hotspot_start, "hotspot-stop": cmd_hotspot_stop}
 
 
 def main():

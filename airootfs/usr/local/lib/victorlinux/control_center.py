@@ -37,6 +37,7 @@ import pccheck  # noqa: E402
 import modellib  # noqa: E402
 import victorinput  # noqa: E402
 import cc_ext  # noqa: E402
+import autotune  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRIV = os.environ.get("VICTOR_PRIV", "/usr/local/lib/victorlinux/victor-priv")
@@ -505,11 +506,31 @@ class App:
         elif ngl < 0:
             ngl = hostplan.plan_layers(est, dev, ctx)
         threads = int(settings.get("threads") or 0) or hostplan.default_threads()
-        return {"backend": backend, "reason": reason, "model": model, "estimate": est, "fit": fit,
+        tuned = self.autotune_overrides(settings, model, backend, gl, ram, ctx)
+        if tuned:                                   # this PC's saved benchmark, only where the owner left "automatic"
+            ngl, threads = (tuned.get("ngl", ngl) if backend != "cpu" else 0), tuned.get("threads", threads)
+            if tuned.get("ctx") and tuned["ctx"] != ctx:
+                ctx = tuned["ctx"]
+                est = tc.estimate_memory(model, ctx)
+                ctx_note = "Context from this PC's saved benchmark profile (never above what fits now)."
+        return {"backend": backend, "reason": reason, "model": model, "estimate": est, "fit": fit, "tuned": tuned,
                 "ngl": ngl, "ctx": ctx, "ctx_note": ctx_note, "threads": threads,
                 "device": {k: dev[k] for k in ("kind", "budget", "free", "ambiguous", "notes")} |
                           {"name": (dev["device"] or {}).get("name"), "index": dev.get("index"), "others": len(dev["others"])},
                 "binary": tc.backends()[backend]}
+
+    def machine_id(self, gl=None, ram=None):
+        gl = tc.gpus() if gl is None else gl
+        ram = tc.ram_info() if ram is None else ram
+        return autotune.machine_id(model_advisor.cpu_info().get("name"), [g.get("pci_id") or g.get("name") for g in gl], ram.get("total"))
+
+    def autotune_overrides(self, settings, model, backend, gl, ram, ctx):
+        if not settings.get("autotune_apply", True) or not tc.data_path("config"):
+            return {}
+        prof = autotune.Profiles(tc.data_path("config", "autotune.json")).get(self.machine_id(gl, ram), autotune.model_key(model))
+        if not prof or prof.get("backend") != backend:
+            return {}
+        return autotune.apply(prof, settings.get("gpu_layers", -1), settings.get("threads", 0), settings.get("ctx_auto", True), ctx)
 
     def start_llm(self, settings, force=False):
         with self.lock:
