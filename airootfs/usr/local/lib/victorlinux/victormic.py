@@ -640,6 +640,20 @@ OFFER_PREFIX = "vmic1"
 _SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
 
 
+def deliver_offer_over_fleet(line: str, fleet_device: str, pc_name: str,
+                             run: Callable[..., subprocess.CompletedProcess] | None = None) -> tuple[bool, str]:
+    """Hand the offer to a paired phone through the fleet coordinator (protocol 1.2 `mic_offer`). The offer goes to
+    `victor-fleet mic offer` on stdin, never in argv (process list) and never printed or logged here."""
+    run = run or (lambda argv, data: subprocess.run(argv, input=data, capture_output=True, text=True, timeout=20))
+    try:
+        r = run(["victor-fleet", "mic", "offer", fleet_device, "--pc-name", pc_name], line + "\n")
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"fleet delivery unavailable ({e.__class__.__name__})"
+    if r.returncode != 0:
+        return False, "fleet delivery failed: " + ((r.stderr or "").strip().splitlines() or ["error"])[-1][:200]
+    return True, "handed to the phone over fleet messaging; open the microphone screen there and tap Start"
+
+
 def make_offer(ses: PhoneSession, host: str, port: int, spki_sha256: str) -> str:
     """One-line pairing offer the phone app accepts (paste or QR). Carries the one-time secret: show it only to
     the phone owner, never log it. Fleet messaging delivers the same string when available."""
@@ -690,7 +704,16 @@ def serve(args: argparse.Namespace) -> int:
     for spec in args.offer or []:
         nick, dev, prov, *rest = spec.split(":")
         ses = reg.offer(dev, nick, prov, float(rest[0]) if rest and rest[0] != "read" else 3600, allow_read="read" in rest)
-        print(make_offer(ses, host, args.port, spki), flush=True)
+        line = make_offer(ses, host, args.port, spki)
+        fleet_dev = dict(x.split("=", 1) for x in (args.fleet_device or []) if "=" in x).get(dev) or \
+            next((x for x in (args.fleet_device or []) if "=" not in x), None)
+        if fleet_dev:
+            ok, msg = deliver_offer_over_fleet(line, fleet_dev, args.pc_id)
+            print(f"offer for {nick}: {msg}", file=sys.stderr, flush=True)
+            if not ok:
+                print("Not printed: re-run without --fleet-device to show the offer for copy and paste.", file=sys.stderr, flush=True)
+        else:
+            print(line, flush=True)
     if args.virtual_mic:
         vmic = VirtualMic()
         first = next(iter(reg.active()), None)
@@ -794,6 +817,8 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--pc-id", default=socket.gethostname().replace(" ", "-")[:48] or "pc")
     sv.add_argument("--tls-dir")
     sv.add_argument("--offer", action="append", metavar="NICK:DEVICE:PROVIDER[:TTL_S][:read]")
+    sv.add_argument("--fleet-device", action="append", metavar="[DEVICE=]FLEET_ID",
+                    help="hand the offer to this paired fleet phone instead of printing it (DEVICE= picks which --offer)")
     sv.add_argument("--virtual-mic", action="store_true")
     sv.add_argument("--set-default", action="store_true")
     sv.add_argument("--record", metavar="FILE.wav", help="write received audio to a WAV file (acceptance testing)")

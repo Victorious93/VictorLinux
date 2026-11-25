@@ -267,3 +267,16 @@ def test_command_vocabulary_includes_nicknames_and_is_pushed_on_press():
     c, _ = _ptt(m, rec, sent)
     c.press(); c.release()
     assert "nord" in rec.vocab and "pixel" in rec.vocab
+
+
+def test_offer_over_fleet_goes_on_stdin_never_argv():
+    calls = []
+    def run(argv, data):
+        calls.append((argv, data)); return subprocess.CompletedProcess(argv, 0, "", "")
+    line = "vmic1;h;1;s;" + "ab" * 32 + ";pc;d;keyboard;" + "f" * 64 + ";9"
+    ok, msg = vm.deliver_offer_over_fleet(line, "dev-1", "pc", run)
+    assert ok and calls[0][0] == ["victor-fleet", "mic", "offer", "dev-1", "--pc-name", "pc"]
+    assert "ab" * 32 not in " ".join(calls[0][0]) and calls[0][1].strip() == line and "ab" * 32 not in msg
+    bad = lambda argv, data: subprocess.CompletedProcess(argv, 4, "", "capability_missing: not_supported")
+    ok, msg = vm.deliver_offer_over_fleet(line, "dev-1", "pc", bad)
+    assert not ok and "capability_missing" in msg and "ab" * 32 not in msg

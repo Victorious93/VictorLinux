@@ -458,6 +458,12 @@ class AdminHandler(Base):
         if k == ("GET", "drafts") and len(parts) == 1: return Dh.list()
         if k == ("GET", "drafts") and len(parts) == 2: return Dh.get(parts[1])
         if k == ("POST", "drafts") and len(parts) == 3 and parts[2] == "retry": return Dh.retry(parts[1])
+        M = c.mics
+        if k == ("POST", "mic-offers") and len(parts) == 1:
+            return M.offer(body["device"], body["provider"], body["offer"], body.get("pc_name") or "VictorLinux", int(body["expires_ms"]),
+                           bool(body.get("read")))
+        if k == ("GET", "mic-offers") and len(parts) == 1: return M.list()
+        if k == ("GET", "mic-offers") and len(parts) == 2: return M.get(parts[1])
         if k == ("GET", "events"):
             return [dict(r) for r in s.store.q("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(q.get("n", ["200"])[0]),))]
         if k == ("POST", "tick"): c.tick(); return {"ok": True}

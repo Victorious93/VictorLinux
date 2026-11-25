@@ -9,7 +9,7 @@ protocol major are rejected with a structured error. Minor bumps only add option
 import json, re, time, uuid
 
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 1                      # 1.1 adds terminal_*, draft_* messages and capability `status`; 1.0 peers stay valid
+PROTOCOL_MINOR = 2                      # 1.1 adds terminal_*, draft_* and capability `status`; 1.2 adds mic_offer/mic_status. Older peers stay valid
 MAX_MESSAGE_BYTES = 256 * 1024          # one envelope on the wire
 MAX_BATCH = 64                          # messages per exchange
 MAX_STRING = 4096
@@ -22,10 +22,12 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 WORKER_TYPES = {"enroll_request", "hello", "heartbeat", "ack", "progress", "complete", "fail",
                 "cancel_ack", "approval_needed", "artifact_offer", "node_message",
-                "terminal_status", "draft_status"}                          # 1.1
+                "terminal_status", "draft_status",                          # 1.1
+                "mic_status"}                                               # 1.2
 COORD_TYPES = {"enroll_response", "welcome", "assignment", "cancel", "revoke", "artifact_grant",
                "node_message", "reject",
-               "terminal_open", "terminal_close", "draft_deliver"}          # 1.1
+               "terminal_open", "terminal_close", "draft_deliver",          # 1.1
+               "mic_offer"}                                                 # 1.2
 
 ERROR_CODES = {"bad_request", "unauthorized", "revoked", "unsupported_protocol", "unknown_type", "too_large",
                "stale_attempt", "unknown_job", "quota_exceeded", "capability_missing", "permission_denied",
@@ -154,6 +156,8 @@ def validate_worker_payload(t, p):
         validate_terminal_status(p)
     elif t == "draft_status":
         validate_draft_status(p)
+    elif t == "mic_status":
+        validate_mic_status(p)
 
 
 def validate_plan_manifest(plan):
@@ -400,6 +404,40 @@ def validate_draft_status(p):
     _str(p, "content_hash", 64, optional=True); _str(p, "detail", 256, optional=True)
 
 
+# ------------------------------------------------------------------ 1.2: phone-microphone offer
+# The `vmic1;…` offer carries a one-time secret. It travels only inside this authenticated, ephemeral coordinator->worker
+# message (never the durable outbox, a job, the database, events or logs). The phone still shows a visible screen and only
+# the owner's Start there begins capture; receiving an offer never starts the microphone.
+MIC_PROVIDERS = {"droidcommand", "keyboard"}
+MIC_OPS = {"droidcommand": "mic.offer.droidcommand", "keyboard": "mic.offer.keyboard"}
+MIC_WORKER_STATES = {"received", "accepted", "declined", "failed", "expired"}
+MIC_FINAL = {"accepted", "declined", "failed", "expired"}
+MAX_OFFER_CHARS = 1024
+
+
+def validate_mic_offer(p):
+    _id(p, "offer_id")
+    if _str(p, "provider", 16) not in MIC_PROVIDERS:
+        raise ProtocolError("bad_request", "mic_offer.provider invalid")
+    o = _str(p, "offer", MAX_OFFER_CHARS)
+    parts = o.split(";")
+    if parts[0] != "vmic1" or len(parts) != 10:
+        raise ProtocolError("bad_request", "mic_offer.offer is not a vmic1 offer")
+    if parts[7] != p["provider"]:
+        raise ProtocolError("bad_request", "mic_offer.provider does not match the offer")
+    _str(p, "pc_name", 80)
+    _need(p, "expires_ms", int)
+    if "read" in p and not isinstance(p["read"], bool):
+        raise ProtocolError("bad_request", "mic_offer.read must be a boolean")
+
+
+def validate_mic_status(p):
+    _id(p, "offer_id")
+    if _str(p, "state", 16) not in MIC_WORKER_STATES:
+        raise ProtocolError("bad_request", "mic_status.state invalid")
+    _str(p, "detail", 256, optional=True)
+
+
 def validate_any_payload(t, p):
     """Fixture/test helper: payload validation for every message type this version knows (both directions)."""
     if t in WORKER_TYPES:
@@ -408,5 +446,7 @@ def validate_any_payload(t, p):
         validate_terminal_open(p)
     elif t == "terminal_close":
         _id(p, "session_id"); _str(p, "reason", 256, optional=True)
+    elif t == "mic_offer":
+        validate_mic_offer(p)
     elif t == "draft_deliver":
         validate_draft_deliver(p)

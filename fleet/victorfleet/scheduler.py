@@ -6,7 +6,7 @@ parked in `needs_review` instead of being replayed.
 """
 import json, time
 from .protocol import (ProtocolError, TERMINAL, OP_RE, ID_RE, MAX_ARGS_BYTES, MAX_PLAN_JOBS, MAX_PLAN_BYTES, envelope,
-                       validate_capabilities, now_ms, new_id, TERMINAL_OPS)
+                       validate_capabilities, now_ms, new_id, TERMINAL_OPS, MIC_OPS)
 
 DEFAULTS = {
     "lease_s": 90,                 # assignment lease; refreshed by progress/heartbeat from the owning attempt
@@ -39,6 +39,8 @@ class Coordinator:
         from .messaging import DraftHub
         self.terminals = TerminalHub(self, store, clock)
         self.drafts = DraftHub(self, store, clock)
+        from .micoffer import MicOfferHub
+        self.mics = MicOfferHub(self, store, clock)
 
     def now(self):
         return int(self.clock() * 1000)
@@ -221,6 +223,7 @@ class Coordinator:
     def tick(self):
         self.terminals.tick()
         self.drafts.tick()
+        self.mics.tick()
         t = self.now()
         self._expire_leases(t)
         self._resolve_dependencies(t)
@@ -372,7 +375,8 @@ class Coordinator:
         elif not self.online(d):
             gate = ("offline", "the phone is not connected to the coordinator", "open DroidCommand on the phone and check the network")
         names = {"terminal": TERMINAL_OPS["terminal"], "shell_oneshot": TERMINAL_OPS["shell"], "terminal_root": "terminal.root",
-                 "messaging_sms": TERMINAL_OPS["sms"], "messaging_email": TERMINAL_OPS["email"]}
+                 "messaging_sms": TERMINAL_OPS["sms"], "messaging_email": TERMINAL_OPS["email"],
+                 "mic_droidcommand": MIC_OPS["droidcommand"], "mic_keyboard": MIC_OPS["keyboard"]}
         actions = {"permission_needed": "grant the permission in VictorSuite/VictorSMS on the phone",
                    "owner_interaction_required": "approve on the phone when asked",
                    "version_outdated": "update VictorSuite / VictorSMS / DroidCommand on the phone",
@@ -602,6 +606,9 @@ class Coordinator:
 
     def _on_draft_status(self, dev, env, p):
         self.drafts.on_status(dev, p)
+
+    def _on_mic_status(self, dev, env, p):
+        self.mics.on_status(dev, p)
 
     def _on_node_message(self, dev, env, p):
         """Coordinator-relayed node messaging. Peers cannot expand another phone's permissions: the body is
