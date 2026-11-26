@@ -200,7 +200,7 @@ def lifecycle_boot(iso, w, disk, kernel, fixture, digest, after_update):
         rec("VM selects the CPU backend", cc_json(vm, "/api/status")["backend"]["selected"] == "cpu")
         verify_local_completion(vm)
         cc_json(vm, "/api/chats/setup", {**vault, "confirm": vault["passphrase"]})
-        cc_json(vm, "/api/chats/settings", {"settings": {"max_tokens": 8}})
+        cc_json(vm, "/api/chats/settings", {"settings": {"max_tokens": 16}})
         chat = cc_json(vm, "/api/chats/send", {"message": prompt})
         rec("Control Center saves the chat and the local reply", any(m.get("role") == "assistant" and m.get("content") for m in chat.get("messages", [])))
         write_document = f"printf '%s\\n' {shlex.quote(prompt)} > {marker}"

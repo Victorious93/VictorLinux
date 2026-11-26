@@ -21,8 +21,11 @@ pk = [l.split("\t") for l in rd(f"{ch}/usr/share/victorlinux/packages.tsv").spli
 def sh(c):
     try: return subprocess.run(c, capture_output=True, text=True, timeout=20).stdout.strip()
     except Exception: return "unknown"
+repo = os.path.dirname(here)
+commit = sh(["git", "-c", f"safe.directory={repo}", "-C", repo, "rev-parse", "HEAD"])
 m = {
  "image": "VictorLinux (Debian edition)", "maintainer": "Victorious / Victorious Framework",
+ "git": {"commit": commit or "unknown"},
  "upstream": "Derived from ToriLinux by sasha0552 (Arch-based); Debian edition is a separate live-build implementation",
  "iso": {"file": os.path.basename(iso), "bytes": os.path.getsize(iso), "sha256": h.hexdigest()},
  "profile": profile, "built_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
