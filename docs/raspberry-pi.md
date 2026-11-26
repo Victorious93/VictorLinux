@@ -61,17 +61,17 @@ Expect a few tokens per second for 1-3B models on a Pi 5 and less on a Pi 4. **[
 There is no default password. The owner account is `victor` (the shared VictorLinux tools expect that login name, so the
 setup screens set the **full name** but not a different login — a custom login name is a known limitation).
 
-1. **Desktop:** a setup window (brand colors) asks for full name, password, Wi-Fi country, optional Wi-Fi network,
-   optional SSH public keys and an "SSH on now (key-only)" checkbox.
-2. **Headless with a screen:** the same questions on tty1 (`victor-pi-setup-tui`) before the login prompt.
+1. **Desktop:** set the first owner password on tty1 before the desktop starts. The setup window then asks for full name,
+   Wi-Fi country, optional Wi-Fi network, optional SSH public keys and an "SSH on now (key-only)" checkbox.
+2. **Headless with a screen:** `victor-pi-setup-tui` sets up the owner account and device on tty1 before the login prompt.
 3. **Headless without a screen (e.g. Zero 2 W):** copy `victor-firstboot.conf.example` on the FAT boot partition to
    `victor-firstboot.conf` and fill it in. Plain passwords are refused; use `PASSWORD_HASH` from `openssl passwd -6`.
    The file is applied once, then overwritten and deleted. If any line is invalid, nothing is applied and the reason is
    saved in `/var/lib/victorlinux/firstboot-errors.txt`.
 
 Persistence: the root filesystem is a normal ext4 partition, so settings survive reboot. SSH keys are also copied to the
-`VICTORDATA` data partition (`secrets/ssh_authorized_keys`) and restored at boot if the root is reflashed; the owner
-password hash is kept there too (same mechanism as the Debian edition). SSH stays **off** unless you turn it on, and then
+`VICTORDATA` data partition (`secrets/ssh_authorized_keys`) alongside the owner password hash. After reflashing the root
+filesystem, approve the drive at the console to restore those credentials. SSH stays **off** unless you turn it on, and then
 it is key-only (`victor-priv ssh-enable`).
 
 ## Optional hooks (all off by default)

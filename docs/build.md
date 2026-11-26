@@ -42,10 +42,13 @@ Python dependency at runtime. The Control Center uses only the Python standard l
 ## GitHub Actions
 
 * `.github/workflows/validate.yml` - renders every profile, shellcheck, python tests (no secrets).
-* `.github/workflows/build-iso.yml` - manual build on a GitHub-hosted runner or any runner label you provide.
-  GitHub-hosted runners have limited disk: fine for the lean image, use your own runner for CUDA/HIP/packs.
+* `.github/workflows/build-iso.yml` builds Arch AMD GUI on relevant pull requests. A manual run can build a selected profile. CUDA, HIP, and optional packs may need a runner with more storage.
+* `.github/workflows/debian-iso.yml` builds the Debian live image. `.github/workflows/pi-image.yml` builds Pi Desktop and Headless on relevant pull requests.
+* Image jobs for a `release/` pull request check out its exact head commit. Compare the image manifests before putting artifacts together in a release draft.
 * The original maintainer's SSH secrets and self-hosted runner are **not** used anywhere.
 
 ## Verification gates
 
-See [test-report.md](test-report.md). Do not publish an ISO as "tested" unless those gates pass for it.
+The Arch AMD GUI workflow boots its own image in QEMU, imports a pinned test GGUF, runs CPU inference, and checks that the update tool preserves the model, settings, saved chat, and a document on a file-backed USB image. The Debian full suite uses the VM keyboard to set the first owner password and to approve saved credentials at the next boot. Both suites fetch the same checksum-pinned test model on the build runner and run inference in a guest with restricted networking.
+
+Use the QEMU reports for the exact commit of a release candidate. Include the matching SHA-256 files and manifests with the images. Keep the firmware, physical storage, and GPU results in the [boot checklist](BOOT_CHECKLIST.md).

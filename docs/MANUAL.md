@@ -45,7 +45,7 @@ There is **no published release ISO**. You build an image (or use a CI artifact,
 
 1. In the firmware menu pick the stick or the phone (UEFI preferred; **Secure Boot is not supported** by this ISO — turn it off). A Pi has no PC-style menu; it boots from the card.
 2. The `victor` account auto-logs in on the console. Arch starts Openbox; Debian/Pi desktop starts Xfce (always dark).
-3. Debian asks for *your* owner password (first-run window). Arch has no password wizard. Pi desktop or a headless tty asks for name, password, Wi-Fi country, optional Wi-Fi and optional SSH keys. Radios start soft-blocked until a Wi-Fi country is set.
+3. Debian and Pi desktop ask for your first owner password on the text console before the desktop starts. Pi headless asks during its console setup. Press Enter at the Debian or Pi desktop prompt to continue with the owner account locked. On Pi, the rest of setup covers your name, Wi-Fi country, optional Wi-Fi, and optional SSH keys. Radios stay blocked until you set the country.
 4. Confirm persistent storage mounted (not a silent RAM session). Then open the Control Center (`victor-open` or `victor-control`).
 
 The [boot checklist](BOOT_CHECKLIST.md) is the page to print and tick off, including BIOS/UEFI notes and a results table.
@@ -110,7 +110,7 @@ Run these as `victor` in a terminal on the booted system. Several need `sudo -n`
 | `victor-control` | Tk Control Center (desktop only) |
 | `victor-ctl` | The CLI behind it. Groups include `storage`, `backup`, `hw`, `model`, `llama`, `api`, `bench`, `docs`, `diag`, `ssh`, `input`, `bluetooth`, plus feature groups `chats`, `coral`, `hotspot`, `image`, `switch`, `tune`, `voice` when those modules load. Try `victor-ctl --help` |
 | `victor-mesh` | Same mesh CLI as Arch |
-| `victor-firstrun` | First-run password window (normally starts by itself) |
+| `victor-firstrun` | Shows how to finish owner setup if you skipped the first-boot console prompt |
 | `victor-theme` | Dark theme; `status` should report `dark` |
 | `victor-chat` | Helper around local chat (the Chat tab / `victor-ctl chats` is the encrypted vault) |
 | `victor-input`, `victor-mic`, `victor-bt-pair`, `victor-phone*` , `victor-pc` | Same roles as on Arch |
@@ -217,6 +217,6 @@ Save `victor-diag` (Arch) or `victor-ctl diag show` (Debian/Pi) when something i
 
 The intended model is in [security](security.md): locked accounts, no default password, sudo limited to validated helpers, services off or on loopback until you opt in, no telemetry.
 
-The [security audit](SECURITY_AUDIT.md) is a code review of this tree, with findings, what was fixed, and what was left open. Read it if you care about residual issues (for example, first-run password setup and auto-restoring a password hash from a labelled data drive). It is not a penetration-test report, and nothing in it was exercised on a booted machine here.
+The [security audit](SECURITY_AUDIT.md) records fixes to first-run owner setup and data-drive credential restoration, along with open items for Mesh state, the Arch firewall, and fleet requests.
 
 For a first run on real hardware, follow the [boot checklist](BOOT_CHECKLIST.md) and fill in its results table. This manual does not replace that pass.

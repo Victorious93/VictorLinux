@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.event.pull_request.head.sha || github.sha }}
       - name: Tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck mtools dosfstools fdisk e2fsprogs gnupg
       - name: Shell syntax
@@ -42,6 +44,8 @@ jobs:
         profile: ${{ github.event_name == 'workflow_dispatch' && fromJSON(format('["{0}"]', inputs.profile)) || fromJSON('["pi-headless","pi-desktop"]') }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.event.pull_request.head.sha || github.sha }}
       - name: Build tools (mmdebstrap + pinned Debian archive keyring)
         run: |
           set -euo pipefail

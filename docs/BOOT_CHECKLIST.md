@@ -94,8 +94,8 @@ Do these checks on every boot before you go further. The owner account is always
 | Edition | How the session starts **[Certain]** | Success looks like | First setup |
 |---|---|---|---|
 | Arch GUI | tty1 auto-logs in `victor`, `~/.zprofile` runs `startx`, Openbox starts | Dark Openbox desktop, no password prompt, a way to open a terminal and `victor-open` | No first-run password wizard. SSH stays off. |
-| Debian GUI | LightDM auto-logs in `victor` to Xfce (always-dark theme) | Xfce desktop, brand colours, first-run window asking for *your* password | Set a password (works offline). Hash is stored on `VICTORDATA` and restored next boot. With no data partition the prompt comes back. SSH stays off. |
-| Pi 5/4 desktop (`pi-desktop`) | Same Xfce + LightDM path as Debian, plus a Pi setup window | Setup asks for full name, password, Wi-Fi country, optional Wi-Fi, optional SSH public keys, and "SSH on now (key-only)" | Country is required before Wi-Fi is unblocked (radios start soft-blocked). |
+| Debian GUI | The console handles owner setup before LightDM opens Xfce | Set or approve the owner password at the console, then reach the dark Xfce desktop | Enter continues with a locked owner account. With `VICTORDATA`, approve the saved credentials on the next boot. Without it, setup returns. SSH starts off. |
+| Pi 5/4 desktop (`pi-desktop`) | Same console and Xfce login as Debian, plus the Pi setup window | Set the owner password at the console, then complete the Pi setup window | The window covers your name, Wi-Fi country, optional Wi-Fi and SSH keys. The country must be set before Wi-Fi is unblocked. |
 | Pi headless (`pi-headless`, including Zero 2 W) | No desktop. Console setup on tty1 (`victor-pi-setup-tui`), or `victor-firstboot.conf` on the boot partition if there is no screen | You get a login or a shell after setup; `victor-ctl` and `victor-mesh` are on `PATH` | Same questions as the desktop setup. On a Zero 2 W, also check the LLM-disabled behaviour below. |
 
 On every edition, also confirm:

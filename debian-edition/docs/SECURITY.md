@@ -1,8 +1,7 @@
 # Access defaults
 
 * No shared password: user `victor` is created locked in the image (live-config's default `live` password and `NOPASSWD: ALL` sudoers are bypassed by pre-creating the user and booting with `noroot`; hook `9999` fails the build if either appears).
-* AI apps run as `victor`. Root-level actions go through **one** helper (`victor-priv`) with fixed verbs: mount/unmount VICTORDATA (label+type checked, UUID validated), temp session, firewall element, set/reset password
-  (current password required once set), SSH enable/revoke. `victor` is not in group `sudo` until first-run sets a password; then `sudo` requires that password. Only `victor-priv` is passwordless.
+* AI apps run as `victor`. The first owner password is set by the root-only console service. A locked account cannot set its password through `victor-priv`. Once set, changing or resetting the password requires the current password. The narrow helpers in sudoers cover operations such as mounting VICTORDATA, temporary sessions, the firewall, and SSH.
 * SSH: disabled; enable only from Control Center with your **public key**; key-only, `AllowUsers victor`, no root, bound to the address you pick. Host keys are generated at that moment (unique per drive/boot).
 * Firewall: nftables default-drop inbound (loopback, established, ICMP, DHCP allowed).
 * No keys/passwords in logs or diagnostics; the ISO contains no machine-id, SSH host keys, API keys or certificates (verified by `scripts/verify-iso.sh`).

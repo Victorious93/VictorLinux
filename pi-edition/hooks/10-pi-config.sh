@@ -75,6 +75,10 @@ if [ "$PI_DESKTOP" = 1 ]; then
 else
   systemctl set-default multi-user.target
   systemctl enable victor-pi-setup-tty.service
+  # the headless wizard asks for the first owner password itself (no skip), so the console service only approves drives
+  install -d /etc/systemd/system/victor-owner-console.service.d
+  printf '[Service]\nExecStart=\nExecStart=/usr/local/lib/victorlinux/victor-owner-setup approve --timeout 120\n' \
+    > /etc/systemd/system/victor-owner-console.service.d/headless.conf
   rm -f /usr/local/bin/victor-pi-setup /usr/local/bin/victor-control /usr/local/bin/victor-firstrun /usr/local/bin/victor-theme
 fi
 # skel -> owner home (the account was created before the overlay in some orders; keep it in sync)

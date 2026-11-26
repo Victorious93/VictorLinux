@@ -10,7 +10,7 @@ on:
       runner: { description: "runs-on label", default: "ubuntu-24.04", type: string }
       profile: { description: "amd (default) or nvidia", default: "amd", type: choice, options: [amd, nvidia] }
   pull_request:
-    paths: ["debian-edition/**", ".github/workflows/debian-iso.yml"]
+    paths: ["debian-edition/**", "tests/fetch_vm_model.sh", ".github/workflows/debian-iso.yml"]
   push:
     branches: [main]
     paths: ["debian-edition/**", ".github/workflows/debian-iso.yml"]
@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.event.pull_request.head.sha || github.sha }}
       - name: Static checks and unit tests
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
@@ -38,6 +40,8 @@ jobs:
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.event.pull_request.head.sha || github.sha }}
       - name: Free disk space (hosted runners)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
@@ -79,9 +83,11 @@ jobs:
     # NOT a real-hardware boot: it does not cover Secure Boot, physical drives, GPUs or the owner's firmware.
     needs: iso
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: victorlinux-debian-${{ inputs.profile || 'amd' }}
@@ -101,6 +107,10 @@ jobs:
         run: sudo python3 -I debian-edition/tests/vm_test.py smoke "$(ls out/debian/*.iso | head -1)" out/boot-test
       - name: Bootloader test (BIOS and UEFI, real bootloader from the ISO)
         run: sudo python3 -I debian-edition/tests/vm_test.py bootloader "$(ls out/debian/*.iso | head -1)" out/boot-test
+      - name: Fetch the checksummed offline inference fixture
+        run: bash tests/fetch_vm_model.sh out/vm-fixtures/stories15M-q4_0.gguf
+      - name: Test first boot, credential restoration and offline inference
+        run: sudo python3 -I debian-edition/tests/vm_test.py full "$(ls out/debian/*.iso | head -1)" out/vm-fixtures/stories15M-q4_0.gguf out/boot-test
       - uses: actions/upload-artifact@v4
         if: always()
         with:

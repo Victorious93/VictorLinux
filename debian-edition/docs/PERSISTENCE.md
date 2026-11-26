@@ -25,7 +25,7 @@ States and behaviour: `mounted-rw`; `mounted-ro` (dirty filesystem or read-only 
 message says what to delete); `damaged` (mount failed); `missing`; `needs-selection`; `session`.
 
 ## Credentials
-The image ships the `victor` account **locked**. First run asks for the owner's own password (works offline). Its SHA-512 hash is stored on the data partition and re-applied at the next boot by
+The image ships the `victor` account **locked**. First run asks for the owner's password on the text console before the desktop starts. Press Enter or let the prompt time out to boot with the account still locked. Its SHA-512 hash is stored on the data partition and re-applied at the next boot by
 `victor-access.service` **only if this machine sealed it** (an HMAC over the drive UUID, file name and contents, made with a root-only key that never sits on the drive). A drive this machine has not approved is plain storage: it never sets the owner's password, `sudo` or SSH keys. On the Debian live USB the key is new every boot, so after each boot the console (tty1, before the login screen) asks you to type your owner password to approve the drive; Enter skips and nothing is applied. The Raspberry Pi keeps the key on its SD card, so an approved drive restores silently (after reflashing the card, approve it again). With no data partition the prompt reappears each boot. Changing or resetting the password needs the current password. A forgotten password: delete `secrets/owner.shadow`
 and `secrets/.victor-seal.json` on the data partition from another machine (the next boot treats the drive as unapproved and the account stays locked until you set a new password).
 

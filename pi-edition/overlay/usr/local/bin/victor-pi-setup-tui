@@ -4,6 +4,7 @@
 set -uo pipefail
 PRIV=/usr/local/lib/victorlinux/pi/victor-pi-priv
 VPRIV=/usr/local/lib/victorlinux/victor-priv
+OWNERSETUP=/usr/local/lib/victorlinux/victor-owner-setup     # root only, not in sudoers (audit F-13)
 [ "$("$PRIV" setup-status)" = "done" ] && exit 0
 export NEWT_COLORS='root=cyan,black window=white,black border=cyan,black title=magenta,black button=black,cyan actbutton=black,magenta entry=white,black textbox=white,black'
 T="VictorLinux (Raspberry Pi) first-boot setup"
@@ -11,14 +12,10 @@ w() { whiptail --title "$T" "$@" 3>&1 1>&2 2>&3; }
 w --msgbox "Welcome. There is no default password.\n\nThis sets up the owner account (login: victor), your Wi-Fi country, optional Wi-Fi network and optional SSH keys.\n\nSSH stays OFF unless you turn it on here (key-only)." 14 70
 name="$(w --inputbox "Your full name (optional):" 9 70 "")" || name=""
 [ -n "$name" ] && "$PRIV" full-name "$name"
-while :; do
-  p1="$(w --passwordbox "Owner password for login 'victor' (min 8 characters):" 9 70)" || continue
-  p2="$(w --passwordbox "Repeat the password:" 9 70)" || continue
-  if [ "$p1" != "$p2" ] || [ "${#p1}" -lt 8 ]; then w --msgbox "Passwords must match and be at least 8 characters." 8 60; continue; fi
-  if out="$(printf '%s\n' "$p1" | "$VPRIV" set-password 2>&1)"; then break; fi
-  w --msgbox "Could not set the password: $out" 10 70
+# The first owner password is set only here, on the physical console, by the root-only tool (text prompts on this tty).
+until "$OWNERSETUP" console --require; do
+  w --msgbox "Could not set the owner password. Try again." 8 60
 done
-unset p1 p2
 while :; do
   cc="$(w --inputbox "Wi-Fi country (2-letter ISO code, e.g. US, GB, DE). Wi-Fi stays blocked until this is set:" 10 70 "US")" || { cc=""; break; }
   cc="${cc^^}"; "$PRIV" wifi-country "$cc" >/dev/null 2>&1 && break

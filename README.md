@@ -52,7 +52,7 @@ Inference runs on the **PC's** hardware, with no telemetry, no automatic downloa
 ## Install / download
 
 **No VictorLinux release has been published**, so there is no ISO to download from [GitHub Releases](https://github.com/Victorious93/VictorLinux/releases).
-The Arch ISO workflow ([Build ISO](https://github.com/Victorious93/VictorLinux/actions/workflows/build-iso.yml)) is dispatch-only and is not run on every push.
+The [Arch ISO workflow](https://github.com/Victorious93/VictorLinux/actions/workflows/build-iso.yml) builds on pull requests touching Arch image files and accepts manual runs for a specific profile.
 The Debian edition can be built in CI when `debian-edition/` changes ([Debian ISO workflow](https://github.com/Victorious93/VictorLinux/actions/workflows/debian-iso.yml)); those outputs are CI artifacts, not a release, and no ISO of this revision has been booted on real hardware.
 
 Once you have an ISO, prepare a boot stick (this **erases** the target; read [boot media](docs/usb.md) first):
@@ -191,7 +191,7 @@ Import a model with `victor-model-import FILE.gguf` (or `--to-storage` for a cho
 
 ## Status and testing
 
-* **No VictorLinux release is published.** Build status of current `main`: the **Debian edition ISO is built in CI** ([VictorLinux Debian ISO workflow](https://github.com/Victorious93/VictorLinux/actions/workflows/debian-iso.yml), artifact only, not a release); the **Arch edition ISO is not built in CI** (the manual *Build ISO* workflow has not been run). **Nothing has been booted on real hardware.** Earlier Arch ISO evidence (QEMU only, pre-rename) is in the [older report](docs/test-report.md) and applies to those artifacts only.
+* **No VictorLinux release is published.** For build artifacts and QEMU reports, see the [Arch ISO workflow](https://github.com/Victorious93/VictorLinux/actions/workflows/build-iso.yml) and [Debian ISO workflow](https://github.com/Victorious93/VictorLinux/actions/workflows/debian-iso.yml). Check the source commit on the run before using a result. See the [boot checklist](docs/BOOT_CHECKLIST.md) for the physical PC test.
 * **Tested for this storage change** (see the [dated report](docs/2026-11-15-storage-testing.md)): partition planner unit tests; real `make-usb.sh` runs on loop devices including a sparse 3 TiB GPT validated by `sgdisk`;
   QEMU UEFI + BIOS boots of a *generic GRUB test image* written by the same code; multi-drive storage behaviour on real ext4 block devices (simultaneous use, reconnect in a different order, removal,
   duplicates, read-only, full); the Storage tab in Chromium.

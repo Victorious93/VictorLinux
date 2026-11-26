@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""First-run owner setup (works offline). Sets the owner's OWN password and optional SSH public key."""
+"""First-run notice. The owner's first password is set on the physical console while the system boots (victor-owner-setup,
+root only), never from this window: any program running as the owner could otherwise set it and become root (audit F-13)."""
 import subprocess, sys, tkinter as tk
 from tkinter import messagebox, ttk
 PRIV = ["sudo", "-n", "/usr/local/lib/victorlinux/victor-priv"]
@@ -18,18 +19,11 @@ style.configure(".", background="#0b0f1a", foreground="#e8eef9", fieldbackground
 style.configure("TButton", padding=(14, 8))
 style.configure("TButton", background="#00e5ff", foreground="#05121a"); style.map("TButton", background=[("active", "#5cf0ff")])  # brand cyan primary action
 style.configure("TEntry", fieldbackground="#0b0f1a", foreground="#e8eef9", insertcolor="#00e5ff", bordercolor="#33406a")
-ttk.Label(root, wraplength=420, padding=8, text="Welcome to VictorLinux. No shared default password exists. Choose your own owner password "
-          "(min 8 chars). It is stored as a hash on your data partition (if one is selected) so it survives reboot; without a data "
-          "partition you will be asked again each boot.").pack()
-p1, p2 = tk.StringVar(), tk.StringVar()
-for lab, v in (("Password", p1), ("Repeat", p2)):
-    ttk.Label(root, text=lab).pack(anchor="w", padx=8); ttk.Entry(root, textvariable=v, show="*").pack(fill="x", padx=8)
-def go():
-    if p1.get() != p2.get() or len(p1.get()) < 8:
-        return messagebox.showerror("Password", "Passwords must match and be at least 8 characters.")
-    r = subprocess.run([*PRIV, "set-password"], input=p1.get() + "\n", capture_output=True, text=True)
-    if r.returncode: return messagebox.showerror("Error", r.stderr)
-    messagebox.showinfo("Done", "Owner password set. SSH stays OFF until you enable it in Control Center > Remote access.")
-    root.destroy()
-ttk.Button(root, text="Save", command=go).pack(pady=8)
+ttk.Label(root, wraplength=440, padding=8, text="Welcome to VictorLinux. No owner password is set yet, so sudo is unavailable.\n\n"
+          "Your first password can only be set on the text console while the computer boots, before this desktop appears: "
+          "reboot and answer the prompt on the black screen (press Enter there to skip). It cannot be set from inside the "
+          "desktop, because any program running here could then take over the machine.\n\n"
+          "The desktop and the Control Center work without it. If you already set a password and keep it on your data drive, "
+          "the console asks you to type it once per boot to approve the drive.").pack()
+ttk.Button(root, text="OK", command=root.destroy).pack(pady=8)
 root.mainloop()
