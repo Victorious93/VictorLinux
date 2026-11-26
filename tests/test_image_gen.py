@@ -142,3 +142,30 @@ def test_debian_cli(deb):
     assert r["ok"] and os.path.isfile(r["file"])
     with pytest.raises(VictorError):
         di.handle(argparse.Namespace(cmd="set", assign=["model=../../etc/shadow"]))
+
+
+def test_optional_victorious_studio_links_are_local_and_preserve_generator():
+    from html.parser import HTMLParser
+
+    class Links(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                self.links.append(dict(attrs))
+
+    with open(os.path.join(ARCH, "web", "ext", "imagegen.html")) as stream:
+        html = stream.read()
+    parser = Links()
+    parser.feed(html)
+    links = [a for a in parser.links if a.get("href", "").startswith("http")]
+    assert {a["href"] for a in links} == {
+        "http://127.0.0.1:8188/victorious-studio/",
+        "http://127.0.0.1:8188/",
+    }
+    for link in links:
+        assert link["target"] == "_blank"
+        assert {"noopener", "noreferrer"} <= set(link["rel"].split())
+    assert 'id="igGo"' in html and 'id="igOn"' in html
