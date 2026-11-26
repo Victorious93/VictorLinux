@@ -2,6 +2,11 @@
  <style>#igOut img{max-width:100%;border-radius:14px;border:1px solid #00e5ff55;background:#0b0f1a}#igBar{height:8px;border-radius:8px;background:var(--s2);overflow:hidden;max-width:420px}#igBar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#00e5ff,#ff2bd6)}#igPrompt{width:100%;min-height:70px}</style>
  <div class="hero"><div><div class="eyebrow">Offline pictures</div><h2>Image generation. <em>Nothing leaves this PC.</em></h2><p>Describe a picture and stable-diffusion.cpp draws it on this computer, with a program and model you provide. Off by default; nothing is downloaded for you.</p></div><span class="hero-badge" id="igBadge">● Off</span></div>
  <div id="igWarn"></div>
+ <div class="card"><h2><svg><use href="#i-chip"/></svg>Victorious-ComfyUI Studio (optional)</h2>
+  <p>Use the separate Victorious-ComfyUI application for advanced node workflows, character profiles, LoRA and photo editing. Start an installed copy on this PC with <code>python main.py --offline --listen 127.0.0.1 --port 8188</code> from its configured Python environment.</p>
+  <p><a class="b" href="http://127.0.0.1:8188/victorious-studio/" target="_blank" rel="noopener noreferrer">Open Victorious Studio</a> <a href="http://127.0.0.1:8188/" target="_blank" rel="noopener noreferrer">Advanced editor</a></p>
+  <p class="mut">Local PC browser only. This does not start, install, or expose a server, and does not send prompts or credentials. The separate Studio feature must be present in your installed fork. Existing offline image generation below remains independent.</p>
+ </div>
  <div class="card"><h2><svg><use href="#i-chip"/></svg>Draw</h2>
   <label for="igPrompt">Describe the picture</label><textarea id="igPrompt" maxlength="1000"></textarea>
   <div class="row"><div><label for="igNeg">Avoid (optional)</label><input id="igNeg" size="40" maxlength="1000"></div>
