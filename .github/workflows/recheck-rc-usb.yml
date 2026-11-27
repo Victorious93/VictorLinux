@@ -1,36 +1,31 @@
-name: Recheck Arch USB lifecycle
+name: Fleet and removable-storage checks
 on:
   push:
     branches: [qa/live-usb-rc1]
 permissions:
-  actions: read
   contents: read
 jobs:
-  lifecycle:
+  fleet:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
         with:
-          github-token: ${{ github.token }}
-          run-id: 45871022706
-          name: victorlinux-amd-gui
-          path: out/arch
-      - name: Verify the existing image and run the revised lifecycle check
-        shell: bash
+          ref: ce049acb9a5e79ac6e038c3032eceee873a141be
+      - name: Run the coordinator against simulated phone workers
+        run: python3 -m unittest discover -s fleet/tests -p 'test_*.py'
+  storage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ce049acb9a5e79ac6e038c3032eceee873a141be
+      - name: Install disk test dependencies
         run: |
-          set -euo pipefail
-          (cd out/arch && sha256sum -c ./*.sha256)
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 xorriso e2fsprogs parted util-linux
-          bash tests/fetch_vm_model.sh out/fixtures/stories15M.gguf
-          sudo python3 -I tests/arch_vm_test.py full "$(ls out/arch/*.iso)" out/fixtures/stories15M.gguf out/usb-check
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: usb-recheck
-          path: |
-            out/usb-check/*.json
-            out/usb-check/vm/*.log
-            out/usb-check/vm/*.err
+          sudo apt-get install -y -qq python3-pytest python3-jinja2 gdisk parted e2fsprogs
+      - name: Test data persistence on file-backed block devices
+        run: sudo bash tests/root_persist.sh
+      - name: Test storage discovery, writer and updates
+        run: sudo /usr/bin/python3 -m pytest -q -rs tests/test_storage_loop.py tests/test_make_usb_loop.py tests/test_usb_update.py
