@@ -61,7 +61,27 @@ def test_no_default_password_anywhere():
 def test_shipped_relay_conf_is_empty_and_valid():
     cfg = rv.parse_relay(read(os.path.join(ARCH, "etc", "victorlinux", "rustdeskv-relay.conf")))
     assert cfg == {"rendezvous_server": "", "relay_server": "", "api_server": "", "key": ""}
-    assert all(v == "" for _, v in rv.relay_options(cfg))      # empty value clears the option = public servers
+    with pytest.raises(rv.SetupError):
+        rv.require_private_relay(cfg)
+
+
+VALID_RELAY = "rendezvous_server = 100.64.0.10:21116\nrelay_server = 100.64.0.10:21117\nkey = " + "A" * 43 + "=\n"
+
+
+@pytest.mark.parametrize("config", [
+    "", "rendezvous_server = 100.64.0.10\nrelay_server = 100.64.0.10\n",
+    VALID_RELAY.replace("100.64.0.10:21116", "rs-ny.rustdesk.com:21116"),
+    VALID_RELAY.replace("100.64.0.10:21117", "relay.rustdesk.com:21117"),
+    VALID_RELAY + "api_server = https://api.rustdesk.com\n",
+    VALID_RELAY.replace("A" * 43 + "=", "A" * 20),
+])
+def test_private_relay_required(config):
+    with pytest.raises(rv.SetupError):
+        rv.require_private_relay(rv.parse_relay(config))
+
+
+def test_private_relay_valid():
+    assert rv.require_private_relay(rv.parse_relay(VALID_RELAY))["rendezvous_server"] == "100.64.0.10:21116"
 
 
 def test_relay_accepts_own_server():
@@ -132,6 +152,7 @@ def priv(tmp_path, monkeypatch):
     monkeypatch.setattr(rv, "STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(rv, "MARKER", str(tmp_path / "state" / "enabled"))
     monkeypatch.setattr(rv, "RELAY_CONF", str(tmp_path / "relay.conf"))
+    (tmp_path / "relay.conf").write_text(VALID_RELAY)
     monkeypatch.setattr(rv, "RUN", str(tmp_path / "run"))
     monkeypatch.delenv("VICTOR_RUSTDESKV_PERSIST", raising=False)
     monkeypatch.setattr(p, "time", Clock)
@@ -161,11 +182,11 @@ def test_apply_sets_password_only_policy(priv, monkeypatch, capsys):
     priv.cmd_apply()
     assert fake.opts["verification-method"] == "use-permanent-password"
     assert fake.opts["approve-mode"] == "password"
-    assert fake.opts["custom-rendezvous-server"] == "" and "public" in capsys.readouterr().out
+    assert fake.opts["custom-rendezvous-server"] == "100.64.0.10:21116" and "custom server" in capsys.readouterr().out
 
 
 def test_apply_uses_relay_config_when_set(priv, monkeypatch, tmp_path):
-    (tmp_path / "relay.conf").write_text("rendezvous_server = hbbs.example.com\nrelay_server = hbbr.example.com\n")
+    (tmp_path / "relay.conf").write_text(VALID_RELAY.replace("100.64.0.10:21116", "hbbs.example.com").replace("100.64.0.10:21117", "hbbr.example.com"))
     fake = FakeRD()
     monkeypatch.setattr(priv, "rd", fake)
     priv.cmd_apply()
@@ -204,6 +225,16 @@ def test_setup_creates_marker_only_after_password_is_accepted(priv, monkeypatch,
     assert os.path.exists(rv.MARKER)
     assert ["systemctl", "start", rv.UNIT] in calls
     assert "my own long secret" not in capsys.readouterr().out
+
+
+def test_missing_server_blocks_setup_and_preflight(priv, monkeypatch, tmp_path):
+    (tmp_path / "relay.conf").write_text("")
+    calls = _setup(priv, monkeypatch, "my own long secret", FakeRD())
+    with pytest.raises(SystemExit):
+        priv.cmd_check()
+    with pytest.raises(SystemExit):
+        priv.cmd_setup()
+    assert not calls and not os.path.exists(rv.MARKER)
 
 
 def test_setup_rejects_weak_password_without_starting_anything(priv, monkeypatch):
@@ -317,6 +348,7 @@ def test_priv_rejects_unknown_verb(priv):
 def test_unit_is_gated_and_fails_closed():
     unit = read(os.path.join(ARCH, "etc", "systemd", "system", "victor-rustdeskv.service"))
     assert "ConditionPathExists=/var/lib/victorlinux/rustdeskv/enabled" in unit
+    assert unit.index("ExecStartPre=/usr/local/lib/victorlinux/victor-rustdeskv-priv check") < unit.index("ExecStart=/usr/bin/rustdesk --service")
     assert re.search(r"^ExecStartPost=/usr/local/lib/victorlinux/victor-rustdeskv-priv apply$", unit, re.M)   # no '-' prefix
     assert "WantedBy=multi-user.target" in unit and "Conflicts=rustdesk.service" in unit
 

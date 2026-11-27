@@ -3,10 +3,13 @@
 Pure logic only (validation, paths, policy). No secret is ever stored here: the owner's permanent password goes to
 RustDeskV's own config through its IPC, and is never written to this repository, to /etc or to a log.
 """
+import base64
+import binascii
 import ipaddress
 import json
 import os
 import re
+from urllib.parse import urlsplit
 
 OWNER = "victor"
 RUN = os.environ.get("VICTOR_RUN", "/run/victor")
@@ -138,8 +141,28 @@ def load_relay(path=None):
         return parse_relay("")
 
 
+def require_private_relay(cfg):
+    """Require explicit self-hosted endpoints and a valid server public key before host startup."""
+    for name in ("rendezvous_server", "relay_server"):
+        if not cfg[name]:
+            raise SetupError(f"{name} must be set before enabling the host")
+    for name in ("rendezvous_server", "relay_server", "api_server"):
+        value = cfg[name]
+        if not value:
+            continue
+        host = urlsplit(value if name == "api_server" else "//" + value).hostname
+        if host and (host.lower() == "rustdesk.com" or host.lower().endswith(".rustdesk.com")):
+            raise SetupError(f"{name}: public RustDesk endpoints are not permitted for the host")
+    try:
+        if len(base64.b64decode(cfg["key"], validate=True)) != 32:
+            raise ValueError("wrong key length")
+    except (ValueError, binascii.Error):
+        raise SetupError("set your server's 32-byte Ed25519 public key (id_ed25519.pub)") from None
+    return cfg
+
+
 def relay_options(cfg):
-    """(rustdesk option, value) pairs. An empty value clears the option, so emptying the file returns to the public servers."""
+    """(rustdesk option, value) pairs for the validated configuration."""
     return [(RELAY_KEYS[k], cfg[k]) for k in RELAY_KEYS]
 
 

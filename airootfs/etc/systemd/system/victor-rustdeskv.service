@@ -10,6 +10,7 @@ ConditionPathExists=/usr/bin/rustdesk
 
 [Service]
 Type=simple
+ExecStartPre=/usr/local/lib/victorlinux/victor-rustdeskv-priv check
 ExecStartPre=/usr/local/lib/victorlinux/victor-rustdeskv-priv mount
 ExecStart=/usr/bin/rustdesk --service
 # Fail closed: if the permanent-password-only policy cannot be confirmed, the unit stops.
