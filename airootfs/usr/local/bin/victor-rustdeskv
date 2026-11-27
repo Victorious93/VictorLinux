@@ -6,7 +6,7 @@
   victor-rustdeskv setup --password-stdin   same, password read from stdin (for scripts over a trusted channel)
   victor-rustdeskv disable             stop the host and keep it off until you run setup again
   victor-rustdeskv reset               disable and delete this PC's RustDeskV ID and password
-  victor-rustdeskv relay               show the self-hosted server config (empty = public RustDesk servers)
+  victor-rustdeskv relay               show the self-hosted server config (required for unattended access)
   victor-rustdeskv autostart on|off    GUI builds: open the RustDeskV window at login
   victor-rustdeskv open                GUI builds: open the RustDeskV window
 
@@ -51,8 +51,8 @@ def cmd_status():
     if s["id"]:
         print("  ID:", s["id"])
     print("  access policy: permanent password only (no one-time passwords, no click-to-accept)")
-    print("  servers:", {"public": "public RustDesk servers", "custom": "your own server (rustdeskv-relay.conf)"}.get(
-        s["servers"], "INVALID relay config: " + s["relay_error"]))
+    print("  servers:", {"custom": "your own server (rustdeskv-relay.conf)"}.get(
+        s["servers"], "NOT READY: " + s["relay_error"]))
     print("  settings:", "kept on persistent storage" if s["config_persistent"] else "RAM only (temporary session)")
     return 0
 
@@ -84,10 +84,13 @@ def cmd_relay():
     except rv.SetupError as e:
         print("relay config is invalid:", e, file=sys.stderr)
         return 1
-    if not cfg["rendezvous_server"]:
-        print(f"No self-hosted server set: public RustDesk servers are used. Edit {rv.RELAY_CONF} as root to change that.")
     for k, v in cfg.items():
         print(f"{k} = {v or '(empty)'}" if k != "key" else f"key = {'(set)' if v else '(empty)'}")
+    try:
+        rv.require_private_relay(cfg)
+    except rv.SetupError as e:
+        print(f"Host startup blocked: {e}. Edit {rv.RELAY_CONF} as root.", file=sys.stderr)
+        return 1
     return 0
 
 

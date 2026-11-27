@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """victor-rustdeskv-priv: the root half of the RustDeskV host (run via `sudo -n`). Fixed verbs, strict validation.
 
-Verbs: status | setup (owner password on stdin, one line) | apply | mount | umount | restore | disable | reset.
+Verbs: status | check | setup (owner password on stdin, one line) | apply | mount | umount | restore | disable | reset.
 It never takes a command, path or flag from the caller and never prints or stores the password.
 There is no default password: until `setup` succeeds, victor-rustdeskv.service does not start at all.
 """
@@ -126,12 +126,20 @@ def cmd_umount():
         run(["umount", rv.CONFIG_DIR])
 
 
+def checked_relay():
+    try:
+        return rv.require_private_relay(rv.load_relay())
+    except (rv.SetupError, OSError) as e:
+        die(f"relay config rejected: {e}; configure {rv.RELAY_CONF} first")
+
+
+def cmd_check():
+    checked_relay()
+
+
 def cmd_apply():
     """Fail closed: if the policy cannot be confirmed, the service stops (ExecStartPost fails)."""
-    try:
-        relay = rv.load_relay()
-    except rv.SetupError as e:
-        die(f"relay config rejected: {e}")
+    relay = checked_relay()
     wanted = list(rv.POLICY) + rv.relay_options(relay)
     deadline = time.time() + 45
     last = ""
@@ -145,8 +153,7 @@ def cmd_apply():
                 last = (got.stdout or got.stderr).strip()[-200:]
                 break
         if ok:
-            print("policy applied: permanent password only, no click-to-accept"
-                  + (", custom server" if relay["rendezvous_server"] else ", public RustDesk servers"))
+            print("policy applied: permanent password only, no click-to-accept, custom server")
             return
         time.sleep(1)
     die("RustDeskV did not accept the access policy in time; refusing to leave it running. " + last)
@@ -158,9 +165,9 @@ def cmd_setup():
     pw = sys.stdin.readline().rstrip("\n")
     try:
         rv.validate_password(pw)
-        rv.load_relay()
     except rv.SetupError as e:
         die(str(e))
+    checked_relay()
     write_marker_state()
     r = run(["systemctl", "start", rv.UNIT], timeout=90)
     if r.returncode != 0:
@@ -230,9 +237,13 @@ def cmd_status():
     enabled = run(["systemctl", "is-enabled", rv.UNIT], timeout=10).stdout.strip()
     try:
         relay = rv.load_relay()
-        relay_state = "custom" if relay["rendezvous_server"] else "public"
+        relay_state = "custom"
         relay_err = ""
-    except rv.SetupError as e:
+        try:
+            rv.require_private_relay(relay)
+        except rv.SetupError as e:
+            relay_state, relay_err = "unconfigured", str(e)
+    except (rv.SetupError, OSError) as e:
         relay_state, relay_err = "invalid", str(e)
     persistent = persist_base() is not None
     rid = ""
@@ -243,7 +254,7 @@ def cmd_status():
                       "config_persistent": persistent, "id": rid, "policy": dict(rv.POLICY)}))
 
 
-VERBS = {"status": cmd_status, "setup": cmd_setup, "apply": cmd_apply, "mount": cmd_mount, "umount": cmd_umount,
+VERBS = {"status": cmd_status, "setup": cmd_setup, "check": cmd_check, "apply": cmd_apply, "mount": cmd_mount, "umount": cmd_umount,
          "restore": cmd_restore, "disable": cmd_disable, "reset": cmd_reset}
 
 

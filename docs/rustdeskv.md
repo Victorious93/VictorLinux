@@ -32,7 +32,7 @@ victor-rustdeskv reset      # disable and delete this PC's ID and password
 
 What setup does [Certain for the logic, Likely for RustDesk's side]:
 
-1. Checks the password (length, printable ASCII, not a trivial one). The password goes to the root helper on **stdin**, never in
+1. Checks the self-hosted server configuration and password (length, printable ASCII, not a trivial one). The password goes to the root helper on **stdin**, never in
    a file, setting, log or the Control Center.
 2. Starts the service, which applies the policy `verification-method=use-permanent-password` and `approve-mode=password`
    on every start: no one-time passwords, no click-to-accept. If RustDeskV does not confirm the policy within 45 s the unit
@@ -48,12 +48,11 @@ temporary session it lives in RAM and you run `setup` again after power-off. The
 No inbound port is opened: RustDesk connects out to a rendezvous/relay server. The Debian nftables policy and the Arch image
 are left unchanged. Direct IP access stays at RustDesk's default (off) [Likely].
 
-## Servers: public RustDesk or your own
+## Servers: self-hosted configuration required
 
-`/etc/victorlinux/rustdeskv-relay.conf` is a placeholder, **empty by default** = the public RustDesk servers. To self-host
-(hbbs/hbbr), fill in `rendezvous_server`, `relay_server`, optional `api_server`, and `key` (your server's **public** key) as root, then
-`systemctl restart victor-rustdeskv`. Values are validated; a bad value stops the host from starting instead of falling back
-quietly. Never put a password in that file.
+The unattended host now refuses to start without explicit rendezvous and relay endpoints and a valid server public key. The shipped configuration is intentionally empty. Deploy the [RustDeskV private server kit](https://github.com/Victorious93/rustdeskV/tree/master/deploy/private-server) and run its `python3 serverctl.py client-config`. As root, edit `/etc/victorlinux/rustdeskv-relay.conf`: map `id_server` to `rendezvous_server`, copy `relay_server` and `key`, and leave `api_server` empty unless required. Run `victor-rustdeskv relay` to validate, then run setup. Explicit rustdesk.com endpoints are rejected. Existing configured hosts must have valid settings before their next restart; disabling the host remains available.
+
+**Limitation:** the bundled interim stock RustDesk binary can initiate network activity before its post-start IPC policy is applied, and the standalone GUI is not covered by this host gate. This preflight prevents unconfigured unattended host startup; it is not a network egress guarantee. For production, use the verified fork build when available and enforce firewall/VPN egress policy independently. Never put a password or private key in the relay file.
 
 ## GUI: autostart and desktop entry
 
