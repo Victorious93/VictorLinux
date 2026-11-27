@@ -8,9 +8,14 @@ machine.
   approve    A data drive offers saved credentials (owner password hash, SSH keys) that this machine has not approved.
              They are trusted only after the owner types the password they belong to (audit F-10). Skipping leaves the
              drive as plain storage that never touches accounts, sudo or SSH keys.
-  console    approve (more steps are added by the first-password flow).
+  console    approve, then, while the owner account is still locked, set the FIRST owner password (audit F-13).
+             `console --require` (the Pi headless wizard) does not allow skipping and does not time out.
+
+The first password can be set nowhere else: `victor-priv set-password` refuses while the account is locked, because it is
+callable (via sudo) by every process running as the owner. This tool is reachable only from the physical console.
+Recovery if the password is lost: debian-edition/docs/PERSISTENCE.md.
 """
-import os, pwd, select, subprocess, sys, termios
+import json, os, pwd, select, subprocess, sys, termios
 sys.path.insert(0, "/usr/local/lib/victorlinux")
 from victorlib import ownertrust
 from victorlib.common import run
@@ -129,6 +134,80 @@ def approve(con, run_priv=None):
     return 0
 
 
+MIN_LEN = 8
+
+
+def make_hash(password):
+    h = run(["openssl", "passwd", "-6", "-stdin"], input=password + "\n").stdout.strip()
+    if not ownertrust.valid_hash(h):
+        raise ownertrust.TrustError("hashing failed")
+    return h
+
+
+def apply_password(password, run_cmd=None, *, persist=True):
+    """Set the owner's password, give the owner sudo (password-gated) and keep the hash on the data drive, sealed."""
+    run_cmd = run_cmd or run
+    h = make_hash(password)
+    r = run_cmd(["usermod", "-p", h, OWNER])
+    if getattr(r, "returncode", 0):
+        raise ownertrust.TrustError("could not set the password: " + (getattr(r, "stderr", "") or "").strip())
+    run_cmd(["usermod", "-aG", "sudo", OWNER])
+    note = ""
+    drive = ownertrust.current_drive() if persist else None
+    if drive:
+        try:
+            ownertrust.seal(drive, ownertrust.OWNER_SHADOW, json.dumps({"hash": h}), os.geteuid(), os.getegid())
+            note = " It is saved on the data drive (sealed by this machine)."
+        except (ownertrust.TrustError, OSError) as e:
+            note = f" It could not be saved on the data drive ({e}); you will be asked again next boot."
+    return note
+
+
+def first_password(con, require=False, *, persist=True):
+    """0 when the account has (or just got) a password, 1 when the owner skipped, 2 on an error."""
+    if not ownertrust.owner_locked():
+        return 0
+    switch_to_console()
+    con.say("")
+    con.say("=" * 70)
+    con.say(" VictorLinux: choose your owner password (login name: victor)")
+    con.say(" There is no default password. This console is the only place the FIRST password can be set,")
+    con.say(" so nothing running inside the desktop can set it for you.")
+    con.say(f" At least {MIN_LEN} characters. It is used for sudo and stored as a hash, never in clear text.")
+    if not require:
+        con.say(" Press Enter to skip: the account stays locked (no sudo); this is asked again at the next boot.")
+    con.say("=" * 70)
+    tries = 0
+    while require or tries < 5:
+        tries += 1
+        p1 = con.ask("New owner password: ", secret=True)
+        if p1 is None or (p1 == "" and not require):
+            con.say("Skipped. The owner account stays locked.")
+            return 1
+        if p1 == "":
+            con.say("A password is required here.")
+            continue
+        if len(p1) < MIN_LEN:
+            con.say(f"Too short: use at least {MIN_LEN} characters.")
+            continue
+        p2 = con.ask("Repeat the password: ", secret=True)
+        if p2 is None:
+            con.say("Skipped. The owner account stays locked.")
+            return 1
+        if p1 != p2:
+            con.say("The two entries differ. Try again.")
+            continue
+        try:
+            note = apply_password(p1, persist=persist)
+        except (ownertrust.TrustError, OSError) as e:
+            con.say(f"Error: {e}")
+            return 2
+        con.say("Owner password set." + note + " SSH stays OFF until you enable it in the Control Center.")
+        return 0
+    con.say("Too many attempts; the account stays locked. Reboot to try again.")
+    return 1
+
+
 def main(argv):
     if os.geteuid() != 0:
         print("victor-owner-setup must run as root on the console", file=sys.stderr)
@@ -144,9 +223,15 @@ def main(argv):
     if cmd not in ("approve", "console"):
         print(__doc__, file=sys.stderr)
         return 2
-    con = Console(timeout=timeout)
-    approve(con)                   # declining is a normal outcome, never a failed boot
-    return 0
+    require = "--require" in args
+    con = Console(timeout=0 if require else timeout)
+    approved = approve(con) == 0
+    if cmd == "approve" or (not approved and not require):
+        return 0
+    # A declined drive remains plain storage. The Pi's headless wizard may still
+    # set up the local account without overwriting credentials on that drive.
+    rc = first_password(con, require, persist=approved)
+    return 2 if (rc == 2 or (require and rc)) else 0
 
 
 if __name__ == "__main__":

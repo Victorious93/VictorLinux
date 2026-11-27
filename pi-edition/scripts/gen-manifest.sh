@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 R="$1"; IMG="$2"; PROFILE="$3"; HERE="$(cd "$(dirname "$0")/.." && pwd)"
 python3 -I - "$R" "$IMG" "$PROFILE" "$HERE" <<'PY'
-import hashlib, json, os, platform, sys, time
+import hashlib, json, os, platform, subprocess, sys, time
 r, img, profile, here = sys.argv[1:5]
 def rd(p):
     try: return open(p).read()
@@ -15,8 +15,15 @@ h = hashlib.sha256()
 with open(img, "rb") as f:
     while c := f.read(1 << 24): h.update(c)
 pk = [l.split("\t") for l in rd(f"{r}/usr/share/victorlinux/packages.tsv").splitlines() if l]
+repo = os.path.dirname(here)
+try:
+    commit = subprocess.check_output(["git", "-c", f"safe.directory={repo}", "-C", repo, "rev-parse", "HEAD"],
+                                     text=True, stderr=subprocess.DEVNULL, timeout=20).strip()
+except (OSError, subprocess.SubprocessError):
+    commit = "unknown"
 print(json.dumps({
   "image": "VictorLinux (Raspberry Pi edition)", "profile": profile,
+  "git": {"commit": commit},
   "img": {"file": os.path.basename(img), "bytes": os.path.getsize(img), "sha256_uncompressed": h.hexdigest()},
   "built_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
   "pins": {**kv(rd(f"{here}/../debian-edition/versions.env")), **kv(rd(f"{here}/versions.env"))},

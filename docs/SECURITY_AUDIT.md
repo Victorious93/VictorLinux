@@ -39,7 +39,7 @@ The design-level items that I did **not** change are listed under "Open".
 | F-05 | Medium | victor-input admin API (127.0.0.1:8472) has no Host/Origin check and parses any POST body as JSON: a web page in the owner's browser can POST `/pair-start`, `/revoke` (no CORS preflight for `text/plain`); with DNS rebinding the QR/pairing URI is readable | `victorinput.py:754-760,847-873` | Likely (tests send the crafted requests; no real browser) | **merged** #44 |
 | F-09 | Medium | Build downloads not pinned: llama UI bundle checked against a `.sha256` from the same server; `nvidia-pstated` (runs as a root service on CUDA images) downloaded with no check | `scripts/prepare-sources.sh:31-47` | Certain | **merged** #42 (`17203da`) |
 | F-10 | Medium | Debian/Pi: a lone ext4 partition labelled `VICTORDATA`/`TORIDATA` is auto-mounted, and `victor-access` (enabled at boot) installs `secrets/owner.shadow` from it as the owner's password hash and adds `victor` to `sudo`. A hostile or forged drive gives the attacker a known sudo password on the next boot | `victorlib/storage.py:27-55`, `victor-priv:302-311`, `victor-access.service` | Certain mechanism; exploit path Likely | **Fixed** by `sec/drive-credential-trust` (PR #55); implemented + unit-tested, not booted |
-| F-13 | Medium | While the owner account is still locked (first run, or no data drive) `victor-priv password` needs no authentication, and `victor` has NOPASSWD sudo to `victor-priv`: any process running as `victor` (browser, a model server, anything the owner runs) can set a password and become root in two commands. The password gate only protects later changes | `victor-priv:169-198`, `etc/sudoers.d/victor-priv:3` | Certain (design) | **Open** |
+| F-13 | Medium | Before the fix, first-owner enrollment could be initiated from an unprivileged desktop session on Debian and Pi. | `victor-priv`, `victor-owner-setup`, `victor-owner-console.service` | Certain (code and unit tests) | **Fix implemented**. The Debian VM suite checks the boot-time console and credential restore. |
 | F-06 | Low | `int(Content-Length)` then `rfile.read(n)`: a negative value blocks the handler thread until the client closes, garbage raises. victor-input, gateway, secbackend, fleet | `victorinput.py:755`, `gateway.py:147,217,366`, `secbackend.py:194`, `fleet/.../server.py:207` | Certain | **merged** #44 |
 | F-07 | Low | victor-voip writes `pjsip.conf` (plaintext SIP/trunk passwords) with the default umask in 0755 dirs; the trunk password is not validated (a newline adds config lines) | `voip/victor_voip.py:140,185` | Certain | **merged** #45 (`78c43fc`) |
 | F-08 | Low | `hmac.compare_digest(str, str)` raises `TypeError` on non-ASCII input: VMIC1 hello MAC, fleet terminal binding/attach token, content hash, Control Center token header (connection dropped instead of 401) | `victormic.py:472`, `fleet/.../terminal.py:186,239`, `messaging.py:104`, `control_center.py` `_auth` | Certain (test) | **merged** #44 |
@@ -74,11 +74,9 @@ PR links (all https://github.com/Victorious93/VictorLinux/pull/N): #41, #42, #43
 
 ## Recommended next steps (not done)
 
-1. F-13: first-run password setup (still open at the time of this PR; see F-13 row).
-   F-10 is done: see "F-10 fix" below.
-2. F-12: keep `tailscaled.state` in a root-owned directory and copy it to/from the data drive with the `safefs` helpers.
-3. F-14: add a small nftables default-drop profile to the Arch edition, with the same sets as Debian.
-4. F-15/F-16: pin the optional packs by commit and add request read timeouts to the fleet server.
+1. F-12: keep `tailscaled.state` in a root-owned directory and copy it to/from the data drive with the `safefs` helpers.
+2. F-14: add a small nftables default-drop profile to the Arch edition, with the same sets as Debian.
+3. F-15/F-16: pin the optional packs by commit and add request read timeouts to the fleet server.
 
 ## F-10 fix: a data drive's credentials need this machine's seal
 

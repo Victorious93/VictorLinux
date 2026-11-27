@@ -44,7 +44,7 @@ sudo ./scripts/provision-usb.py update --device /dev/sdX --iso NEW.iso --confirm
 sudo ./scripts/provision-usb.py verify --device /dev/sdX                                             # read-only check
 ```
 
-Boot the drive, choose the ISO in Ventoy, log in is automatic; the first-run wizard asks you to set **your own** password.
+Choose the ISO in Ventoy. Before the desktop opens, the text console lets you set the owner password or approve credentials already saved on the data drive. Press Enter to skip and leave the owner account locked for this boot. The desktop then opens automatically.
 Details: [docs/USB.md](docs/USB.md), [docs/PERSISTENCE.md](docs/PERSISTENCE.md).
 
 ## Documents

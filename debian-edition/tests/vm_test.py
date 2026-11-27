@@ -11,7 +11,7 @@ Bootloader (BIOS/UEFI) boots are checked separately by `bootloader` mode (screen
 
 Requires: qemu-system-x86_64, xorriso, OVMF (for UEFI), root (loop-mount disposable data disks).
 """
-import json, os, re, shutil, socket, subprocess, sys, time, glob, uuid
+import json, os, re, shlex, shutil, socket, subprocess, sys, time, glob, uuid
 
 RESULTS = []
 
@@ -52,7 +52,7 @@ class VM:
         k, i = kernel
         ap = ("boot=live components noroot username=victor hostname=victorlinux locales=en_US.UTF-8 keyboard-layouts=us "
               "timezone=UTC nopersistence console=ttyS0 systemd.debug_shell=/dev/ttyS1 " + kappend)
-        fwd = "".join(f",hostfwd=tcp::{h}-:{g}" for h, g in hostfwd)
+        fwd = "".join(f",hostfwd=tcp:127.0.0.1:{h}-:{g}" for h, g in hostfwd)
         cmd = ["qemu-system-x86_64", *accel_args(), "-machine", "q35", "-cpu", "max", "-smp", "4", "-m", str(mem), "-display", "none", "-vga", "std",
                "-kernel", k, "-initrd", i, "-append", ap, "-drive", f"file={iso},media=cdrom,readonly=on,if=ide",
                "-netdev", f"user,id=n0{',restrict=on' if net_restrict else ''}{fwd}", "-device", "virtio-net-pci,netdev=n0",
@@ -112,6 +112,14 @@ class VM:
         q.sendall(b'{"execute":"qmp_capabilities"}\n'); q.recv(4096)
         q.sendall(json.dumps({"execute": cmd, "arguments": args}).encode() + b"\n"); time.sleep(1); r = q.recv(65536); q.close(); return r
 
+    def console_line(self, text):
+        """Type fixture text into the guest's virtual keyboard, including Enter."""
+        for char in text + "\n":
+            key = {" ": "spc", "\n": "ret", "-": "minus"}.get(char, char)
+            reply = self.qmp_cmd("send-key", keys=[{"type": "qcode", "data": key}], **{"hold-time": 40})
+            if b'"error"' in reply:
+                raise RuntimeError("QEMU rejected a console keystroke")
+
     def screenshot(self, path):
         ppm = path + ".ppm"; self.qmp_cmd("screendump", filename=ppm); time.sleep(1)
         self.last_colors = ppm_colors(ppm) if os.path.exists(ppm) else 0
@@ -152,6 +160,19 @@ def ctl(vm, args, timeout=300):
     return vm.sh(f"runuser -u victor -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus /usr/local/bin/victor-ctl {args}", timeout)
 
 
+def wait_for_owner_prompt(vm):
+    # The service is ordered before desktop login. Wait for the actual tty1
+    # password reader to turn echo off before sending virtual keyboard input.
+    ready = (
+        'test "$(systemctl show -p SubState --value victor-owner-console.service)" = start'
+        ' && test "$(cat /sys/class/tty/tty0/active)" = tty1'
+        " && stty -F /dev/tty1 -a | grep -Eq '(^|[ ;])-echo([ ;]|$)'"
+    )
+    rc, out = vm.sh(f"timeout 90 bash -c {shlex.quote(f'until {ready}; do sleep 1; done')}", 100)
+    if rc != 0:
+        raise RuntimeError(f"No owner password prompt on tty1: {out}")
+
+
 def full(iso, model, out):
     os.makedirs(out, exist_ok=True); w = f"{out}/vm"; os.makedirs(w, exist_ok=True)
     kern = extract_kernel(iso, f"{w}/k")
@@ -161,12 +182,20 @@ def full(iso, model, out):
     try:
         t = vm.connect(); rec("VM boot to a root debug shell (BIOS-less direct kernel boot, TCG)", True, f"{t:.0f}s")
         rc, o = vm.sh("cat /proc/cmdline; uname -r; . /etc/os-release; echo $PRETTY_NAME"); rec("kernel + Debian release", "Debian" in o, o.replace("\n", " | "))
-        rc, o = vm.sh("systemctl is-system-running --wait 2>&1 | tail -1; systemctl --failed --no-legend | cut -c1-80", 240)
-        rec("system reaches running state; failed units listed", rc == 0, o)
+        wait_for_owner_prompt(vm)
         rc, o = vm.sh("passwd -S victor; test ! -e /etc/sudoers.d/live && echo no-live-sudoers; grep -rc 'NOPASSWD: ALL' /etc/sudoers /etc/sudoers.d | grep -v ':0' || echo no-nopasswd-all")
         rec("owner locked, no shared password, no NOPASSWD:ALL", " L " in o and "no-live-sudoers" in o and "no-nopasswd-all" in o, o)
+        rc, o = vm.sh("runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password </dev/null 2>&1")
+        rec("the desktop password helper requires console enrollment first", rc != 0 and "console" in o.lower(), o)
+        vm.console_line("correct horse 42")
+        vm.console_line("correct horse 42")
+        rc, o = vm.sh("systemctl is-system-running --wait 2>&1; systemctl --failed --no-legend --plain", 240)
+        rec("system reaches running state after console enrollment", o.strip() == "running", o)
+        rc, o = vm.sh("passwd -S victor; test -f /run/victor/data/secrets/owner.shadow && stat -c %a /run/victor/data/secrets/owner.shadow")
+        rec("first password set at tty1 and hash persisted with mode 0600", rc == 0 and " P " in o and "600" in o, o)
         rc, o = vm.sh("systemctl is-enabled ssh 2>&1; systemctl is-active ssh 2>&1; ss -ltnH | awk '{print $4}'")
-        rec("SSH disabled and nothing listening for connections at boot", "enabled" not in o.split("\n")[0] and "active\n" not in o.split("\n")[1:2] and not re.search(r"(0\.0\.0\.0|\*|\[::\]):\d+", "\n".join(o.splitlines()[2:])), o)
+        lines = o.splitlines()
+        rec("SSH disabled and nothing listening for connections at boot", len(lines) >= 2 and lines[0] != "enabled" and lines[1] != "active" and not re.search(r"(0\.0\.0\.0|\*|\[::\]):\d+", "\n".join(lines[2:])), o)
         rc, o = vm.sh("ls /etc/systemd/system/*.wants/ 2>/dev/null | grep -i llama || echo none; pgrep -a llama-server || echo no-llama-running")
         rec("no AI service started at boot", "none" in o and "no-llama-running" in o, o)
         rc, o = vm.sh("cat /run/victor/storage.json; ls /run/victor/")
@@ -178,16 +207,12 @@ def full(iso, model, out):
         rec("DARK theme is the default (GTK/Xfce, terminal, greeter) and the GTK dark theme is installed", o.startswith("dark") and "gtk-theme-installed" in o and "0b0f1a" in o and "Adwaita-dark" in o, o)
         rc, o = vm.sh("runuser -u victor -- /usr/local/bin/victor-theme light; cat /run/victor/data/settings/ui.json")
         rec("light theme request is rejected", "always uses dark" in o, o)
-        # ---- first run: owner password (offline)
-        rc, o = vm.sh("runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv owner-status"); rec("first-run needed (owner-status=locked)", o.strip().endswith("locked"), o)
-        rc, o = vm.sh("printf 'correct horse 42\\n' | runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password"); rec("first-run sets the OWNER's password", rc == 0, o)
         rc, o = vm.sh("printf 'x\\nnewpass1234\\n' | runuser -u victor -- sudo -n /usr/local/lib/victorlinux/victor-priv set-password 2>&1"); rec("password change without the current password is refused", rc != 0 and "wrong" in o, o)
-        rc, o = vm.sh("passwd -S victor; test -f /run/victor/data/secrets/owner.shadow && stat -c %a /run/victor/data/secrets/owner.shadow"); rec("password hash persisted on data partition (0600)", " P " in o and "600" in o, o)
         # ---- inference lifecycle
         rc, o = ctl(vm, "model list"); rec("imported model visible", "test-model.gguf" in o, o)
         rc, o = ctl(vm, "model select test-model.gguf"); rec("select model", rc == 0, o)
         rc, o = ctl(vm, "llama config --set ctx=2048 sleep_idle_minutes=15 jinja=1"); rec("save inference settings", rc == 0, o[-200:])
-        rc, o = ctl(vm, "llama start", 120); rec("service start (CPU fallback explained)", rc == 0 and "CPU" in o.upper() or "no GPU" in o, o[-400:])
+        rc, o = ctl(vm, "llama start", 120); rec("service start (CPU fallback explained)", rc == 0 and ("CPU" in o.upper() or "no GPU" in o), o[-400:])
         rc, o = ctl(vm, "llama start", 60); rec("second concurrent start refused (single model loaded)", rc != 0 and "already running" in o, o)
         time.sleep(15)
         rc, o = ctl(vm, "api selftest --tools", 300); rec("loopback API self-test (health/models/chat/stream)", '"streaming": "verified"' in o and '"chat_completions": "verified"' in o, o[-500:])
@@ -232,11 +257,15 @@ def full(iso, model, out):
     # ---- boot 2: persistence across reboot (still offline)
     vm = VM(iso, w, "boot2", disks=[(disk, False)], net_restrict=True, kernel=kern)
     try:
-        vm.connect(); vm.sh("systemctl is-system-running --wait >/dev/null 2>&1", 240)
+        vm.connect()
+        wait_for_owner_prompt(vm)
         # F-10: the saved hash is NOT trusted on a fresh boot (new machine key); the owner approves it at the console
         rc, o = vm.sh("passwd -S victor"); rec("F-10: saved owner hash is NOT applied before the owner approves the drive", " L " in o, o)
-        rc, o = vm.sh("printf 'wrong password\\n\\n' | /usr/local/lib/victorlinux/victor-owner-setup approve; passwd -S victor"); rec("F-10: wrong password at the console approves nothing", " L " in o, o)
-        rc, o = vm.sh("printf 'correct horse 42\\n' | /usr/local/lib/victorlinux/victor-owner-setup approve; passwd -S victor"); rec("PERSIST: owner credentials restored from data partition after console approval", " P " in o, o)
+        vm.console_line("wrong password")
+        rc, o = vm.sh("passwd -S victor"); rec("F-10: wrong password at the console approves nothing", " L " in o, o)
+        vm.console_line("correct horse 42")
+        vm.sh("systemctl is-system-running --wait >/dev/null 2>&1", 240)
+        rc, o = vm.sh("passwd -S victor"); rec("PERSIST: owner credentials restored after tty1 approval", " P " in o, o)
         rc, o = ctl(vm, "llama config"); rec("PERSIST: inference config survived reboot", '"model": "test-model.gguf"' in o and '"ctx": 2048' in o, o[:200])
         rc, o = ctl(vm, "model list"); rec("PERSIST: model survived reboot", "test-model.gguf" in o, o)
         rc, o = vm.sh("ls /run/victor/data/secrets/ /run/victor/data/logs | head; test -f /run/victor/data/settings/capabilities.json && echo caps-saved"); rec("PERSIST: API key + TLS cert + bounded log snapshot + capability record present", "api.key" in o and "tls" in o and "caps-saved" in o, o)

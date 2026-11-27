@@ -157,16 +157,18 @@ def cmd_full_name(name):
     print("name saved")
 
 
-def cmd_mark_done():
-    os.makedirs(STATE, exist_ok=True); write(DONE, "done\n"); print("first-boot setup complete")
-
-
 def owner_locked():
     for l in open("/etc/shadow"):
         f = l.split(":")
         if f[0] == OWNER:
             return f[1].startswith(("!", "*")) or f[1] == ""
     return True
+
+
+def cmd_mark_done():
+    if owner_locked():          # callable by the owner session: must not be able to skip the console wizard (audit F-13)
+        die("the owner password is not set yet; set it on the physical console first")
+    os.makedirs(STATE, exist_ok=True); write(DONE, "done\n"); print("first-boot setup complete")
 
 
 def cmd_setup_status():

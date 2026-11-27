@@ -2,17 +2,17 @@
 
 A walk-through for Don when a VictorLinux image is first started on real hardware. Follow it step by step, write the result in the [table at the end](#results-table), and keep the diagnostics it asks you to save.
 
-Base: `main` at `973fd69` (2026-11-25, America/New_York). Every claim below comes from the current repository code or docs. Labels:
+This checklist covers the Arch and Debian live images and the Raspberry Pi desktop and headless images.
 
 - **[Certain]**: written in the code or a current document.
 - **[Likely]**: follows from that, but has not been tried on real hardware.
 - **[Guessing]**: plausible, not confirmed.
 
-This revision has **no published release ISO**, and the docs say **no ISO of this revision has been booted on real hardware**. QEMU covered a generic GRUB test image (Arch planner) and, when CI ran it, a Debian ISO boot-test. Firmware, USB controllers, the RX 6800 XT, phones, Pi boards and Victorious Flash are all untested here. A tick in the table is *your* result, not a claim that it already works.
+The Arch and Debian QEMU reports are available with the corresponding image builds. Check the source commit on the run and in the image manifest. Use the results table below to record what happens on your hardware.
 
 ## Before you start
 
-1. **Build or fetch an image** (there is nothing to download from GitHub Releases). See the README, [docs/build.md](build.md), [debian-edition/README.md](../debian-edition/README.md) and [docs/raspberry-pi.md](raspberry-pi.md).
+1. **Build or fetch an image.** Repository maintainers can use an unpublished candidate draft. The matching CI run also provides the image and checksum. See the README, [docs/build.md](build.md), [debian-edition/README.md](../debian-edition/README.md) and [docs/raspberry-pi.md](raspberry-pi.md).
    - Arch: `scripts/build.sh amd gui` → `out/victorlinux-*.iso` (Vulkan + CPU). Optional CUDA image: `scripts/build.sh universal gui` (or `cuda`). Optional HIP pack is separate (`--packs hip`) and experimental.
    - Debian: `debian-edition/build.sh` → `out/debian/VictorLinux-*.iso`. Vulkan + CPU. There is no HIP in the Debian image. An NVIDIA profile uses Vulkan on the NVIDIA driver; it is not a CUDA llama.cpp build.
    - Pi: `pi-edition/build.sh --profile pi-desktop` or `pi-headless` → `out/pi/VictorLinux-pi-*.img.xz`. CPU only (no Vulkan/GPU backend on the Pi).
@@ -89,13 +89,13 @@ Success: you reach a VictorLinux login or desktop, not a "Security Boot Fail", "
 
 ## What "it booted" looks like, by edition
 
-Do these checks on every boot before you go further. The owner account is always `victor`. There is no default or shared password. The physical console auto-logs that account in.
+Do these checks on every boot before you go further. The owner account is `victor`. Each edition handles local login as described below. There is no shared password.
 
 | Edition | How the session starts **[Certain]** | Success looks like | First setup |
 |---|---|---|---|
 | Arch GUI | tty1 auto-logs in `victor`, `~/.zprofile` runs `startx`, Openbox starts | Dark Openbox desktop, no password prompt, a way to open a terminal and `victor-open` | No first-run password wizard. SSH stays off. |
-| Debian GUI | LightDM auto-logs in `victor` to Xfce (always-dark theme) | Xfce desktop, brand colours, first-run window asking for *your* password | Set a password (works offline). Hash is stored on `VICTORDATA` and restored next boot. With no data partition the prompt comes back. SSH stays off. |
-| Pi 5/4 desktop (`pi-desktop`) | Same Xfce + LightDM path as Debian, plus a Pi setup window | Setup asks for full name, password, Wi-Fi country, optional Wi-Fi, optional SSH public keys, and "SSH on now (key-only)" | Country is required before Wi-Fi is unblocked (radios start soft-blocked). |
+| Debian GUI | The console handles owner setup before LightDM opens Xfce | Set or approve the owner password at the console, then reach the dark Xfce desktop | Enter continues with a locked owner account. With `VICTORDATA`, approve the saved credentials on the next boot. Without it, setup returns. SSH starts off. |
+| Pi 5/4 desktop (`pi-desktop`) | Same console and Xfce login as Debian, plus the Pi setup window | Set the owner password at the console, then complete the Pi setup window | The window covers your name, Wi-Fi country, optional Wi-Fi and SSH keys. The country must be set before Wi-Fi is unblocked. |
 | Pi headless (`pi-headless`, including Zero 2 W) | No desktop. Console setup on tty1 (`victor-pi-setup-tui`), or `victor-firstboot.conf` on the boot partition if there is no screen | You get a login or a shell after setup; `victor-ctl` and `victor-mesh` are on `PATH` | Same questions as the desktop setup. On a Zero 2 W, also check the LLM-disabled behaviour below. |
 
 On every edition, also confirm:
