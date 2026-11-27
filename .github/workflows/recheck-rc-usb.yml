@@ -1,0 +1,36 @@
+name: Recheck Arch USB lifecycle
+on:
+  push:
+    branches: [qa/live-usb-rc1]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 45871022706
+          name: victorlinux-amd-gui
+          path: out/arch
+      - name: Verify the existing image and run the revised lifecycle check
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd out/arch && sha256sum -c ./*.sha256)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86 xorriso e2fsprogs parted util-linux
+          bash tests/fetch_vm_model.sh out/fixtures/stories15M.gguf
+          sudo python3 -I tests/arch_vm_test.py full "$(ls out/arch/*.iso)" out/fixtures/stories15M.gguf out/usb-check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: usb-recheck
+          path: |
+            out/usb-check/*.json
+            out/usb-check/vm/*.log
+            out/usb-check/vm/*.err
