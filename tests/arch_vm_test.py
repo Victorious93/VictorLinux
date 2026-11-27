@@ -24,16 +24,17 @@ REPO = Path(__file__).resolve().parents[1]
 class ArchVM(VM):
     """Same driver as the Debian VM, but with archiso boot arguments."""
 
-    def __init__(self, iso, workdir, name, disks=(), mem=4096, kernel=None, boot_disk=None):
+    def __init__(self, iso, workdir, name, disks=(), mem=4096, kernel=None, boot_disk=None, boot_options=None):
         self.w, self.name, self.iso = workdir, name, iso
         self.sock = f"{workdir}/{name}.shell.sock"; self.qmp = f"{workdir}/{name}.qmp"
         self.console = f"{workdir}/{name}.console.log"
         for p in (self.sock, self.qmp):
             if os.path.exists(p): os.unlink(p)
         k, i, install_dir = kernel
-        boot_device = "/dev/vda" if boot_disk else "/dev/sr0"
-        ap = (f"archisobasedir={install_dir} archisodevice={boot_device} cow_spacesize=2G "
-              "console=tty0 console=ttyS0 systemd.debug_shell=/dev/ttyS1")
+        if boot_disk and not boot_options:
+            raise ValueError("The USB lifecycle needs the boot options from the built ISO")
+        ap = (boot_options or f"archisobasedir={install_dir} archisodevice=/dev/sr0 cow_spacesize=2G")
+        ap += " console=tty0 console=ttyS0 systemd.debug_shell=/dev/ttyS1"
         cmd = ["qemu-system-x86_64", *accel_args(), "-machine", "q35", "-cpu", "max", "-smp", "4", "-m", str(mem), "-display", "none", "-vga", "std",
                "-kernel", k, "-initrd", i, "-append", ap,
                "-netdev", "user,id=n0,restrict=on", "-device", "virtio-net-pci,netdev=n0",
@@ -115,6 +116,29 @@ def smoke(iso, out):
     return 0 if RESULTS and all(r["ok"] for r in RESULTS) else 1
 
 
+def usb_boot_options(iso, workdir):
+    """Read the shipped default menu entry so archiso resolves the hybrid USB exactly as on a PC."""
+    found = subprocess.run(["xorriso", "-indev", iso, "-find", "/", "-name", "syslinux.cfg"],
+                           check=True, capture_output=True, text=True)
+    for line in found.stdout.splitlines():
+        if not line.startswith("'"):
+            continue
+        image_path, = shlex.split(line)
+        dest = Path(workdir) / "boot-menu.cfg"
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", iso, "-extract", image_path, str(dest)],
+                       check=True, capture_output=True)
+        entry = None
+        for cfg_line in dest.read_text().splitlines():
+            words = cfg_line.strip().split()
+            if words and words[0].upper() == "LABEL":
+                entry = words[1]
+            if entry == "default" and words and words[0].upper() == "APPEND":
+                if not any(arg.startswith("archisodevice=UUID=") and "%" not in arg for arg in words[1:]):
+                    raise ValueError("The default boot entry lacks a resolved ISO UUID")
+                return " ".join(words[1:])
+    raise ValueError("Could not read the default VictorLinux USB boot entry from the ISO")
+
+
 def usb_action(action, iso, disk):
     """Invoke the real writer only on a loop device backed by this test's file."""
     dev = subprocess.check_output(["losetup", "--find", "--show", "--partscan", str(disk)], text=True).strip()
@@ -160,9 +184,9 @@ def verify_local_completion(vm):
     rec("CPU llama-server produces a chat completion offline", bool(choices and choices[0].get("message", {}).get("content")), out if not choices else "")
 
 
-def lifecycle_boot(iso, w, disk, kernel, fixture, digest, after_update):
+def lifecycle_boot(iso, w, disk, kernel, boot_options, fixture, digest, after_update):
     name = "after-update" if after_update else "first-boot"
-    vm = ArchVM(iso, w, name, disks=[(str(fixture), True)], kernel=kernel, boot_disk=disk)
+    vm = ArchVM(iso, w, name, disks=[(str(fixture), True)], kernel=kernel, boot_disk=disk, boot_options=boot_options)
     prompt = "VictorLinux USB persistence check"
     vault = {"passphrase": "test fixture passphrase"}
     try:
@@ -173,7 +197,8 @@ def lifecycle_boot(iso, w, disk, kernel, fixture, digest, after_update):
         status = cc_json(vm, "/api/status")
         root = status.get("data_root")
         if status.get("persist", {}).get("mode") != "persistent" or not root:
-            raise RuntimeError("Expected VICTORDATA on the VM boot disk")
+            _, devices = vm.sh("findmnt -n -o SOURCE /run/archiso/bootmnt; lsblk -o NAME,FSTYPE,LABEL,MOUNTPOINTS")
+            raise RuntimeError(f"Expected VICTORDATA on the VM boot disk: {status.get('persist')}; {devices}")
         rec(f"{name}: Control Center opened with persistent storage", True)
         model = f"{root}/models/test-model.gguf"
         settings = {"model": model, "ctx": 512, "ctx_auto": False, "backend": "auto"}
@@ -225,6 +250,7 @@ def full(iso, model, out):
         with tempfile.TemporaryDirectory(prefix="victor-vm-") as tmp:
             w = str(out / "vm")
             kern = extract_kernel(iso, f"{w}/k")
+            boot_options = usb_boot_options(iso, tmp)
             disk = Path(tmp) / "usb.img"
             with disk.open("xb") as stream:
                 stream.truncate(Path(iso).stat().st_size + (4 << 30))
@@ -233,10 +259,10 @@ def full(iso, model, out):
             with open(model, "rb") as stream:
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             usb_action("write", iso, disk)
-            lifecycle_boot(iso, w, disk, kern, fixture, digest, after_update=False)
+            lifecycle_boot(iso, w, disk, kern, boot_options, fixture, digest, after_update=False)
             usb_action("update", iso, disk)
             rec("the in-place USB writer verified the ISO payload and kept the data partition", True)
-            lifecycle_boot(iso, w, disk, kern, fixture, digest, after_update=True)
+            lifecycle_boot(iso, w, disk, kern, boot_options, fixture, digest, after_update=True)
     except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         rec("Arch lifecycle completed", False, exc)
     (out / "lifecycle-report.json").write_text(json.dumps(RESULTS, indent=2) + "\n")
