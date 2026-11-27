@@ -2,17 +2,17 @@
 
 A walk-through for Don when a VictorLinux image is first started on real hardware. Follow it step by step, write the result in the [table at the end](#results-table), and keep the diagnostics it asks you to save.
 
-Base: `main` at `973fd69` (2026-11-25, America/New_York). Every claim below comes from the current repository code or docs. Labels:
+This checklist covers the Arch and Debian live images and the Raspberry Pi desktop and headless images.
 
 - **[Certain]**: written in the code or a current document.
 - **[Likely]**: follows from that, but has not been tried on real hardware.
 - **[Guessing]**: plausible, not confirmed.
 
-This revision has **no published release ISO**, and the docs say **no ISO of this revision has been booted on real hardware**. QEMU covered a generic GRUB test image (Arch planner) and, when CI ran it, a Debian ISO boot-test. Firmware, USB controllers, the RX 6800 XT, phones, Pi boards and Victorious Flash are all untested here. A tick in the table is *your* result, not a claim that it already works.
+The Arch and Debian QEMU reports are available with the corresponding image builds. Check the source commit on the run and in the image manifest. Use the results table below to record what happens on your hardware.
 
 ## Before you start
 
-1. **Build or fetch an image** (there is nothing to download from GitHub Releases). See the README, [docs/build.md](build.md), [debian-edition/README.md](../debian-edition/README.md) and [docs/raspberry-pi.md](raspberry-pi.md).
+1. **Build or fetch an image.** Repository maintainers can use an unpublished candidate draft. The matching CI run also provides the image and checksum. See the README, [docs/build.md](build.md), [debian-edition/README.md](../debian-edition/README.md) and [docs/raspberry-pi.md](raspberry-pi.md).
    - Arch: `scripts/build.sh amd gui` → `out/victorlinux-*.iso` (Vulkan + CPU). Optional CUDA image: `scripts/build.sh universal gui` (or `cuda`). Optional HIP pack is separate (`--packs hip`) and experimental.
    - Debian: `debian-edition/build.sh` → `out/debian/VictorLinux-*.iso`. Vulkan + CPU. There is no HIP in the Debian image. An NVIDIA profile uses Vulkan on the NVIDIA driver; it is not a CUDA llama.cpp build.
    - Pi: `pi-edition/build.sh --profile pi-desktop` or `pi-headless` → `out/pi/VictorLinux-pi-*.img.xz`. CPU only (no Vulkan/GPU backend on the Pi).
@@ -89,7 +89,7 @@ Success: you reach a VictorLinux login or desktop, not a "Security Boot Fail", "
 
 ## What "it booted" looks like, by edition
 
-Do these checks on every boot before you go further. The owner account is always `victor`. There is no default or shared password. The physical console auto-logs that account in.
+Do these checks on every boot before you go further. The owner account is `victor`. Each edition handles local login as described below. There is no shared password.
 
 | Edition | How the session starts **[Certain]** | Success looks like | First setup |
 |---|---|---|---|
