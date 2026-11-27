@@ -26,6 +26,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3-pytest python3-jinja2 gdisk parted e2fsprogs
       - name: Test data persistence on file-backed block devices
-        run: sudo bash tests/root_persist.sh
+        run: |
+          test_root=$(mktemp -d /var/tmp/victor-qa.XXXXXXXX)
+          chmod 755 "$test_root"
+          git archive HEAD | tar -x -C "$test_root"
+          sudo bash "$test_root/tests/root_persist.sh"
       - name: Test storage discovery, writer and updates
         run: sudo /usr/bin/python3 -m pytest -q -rs tests/test_storage_loop.py tests/test_make_usb_loop.py tests/test_usb_update.py
